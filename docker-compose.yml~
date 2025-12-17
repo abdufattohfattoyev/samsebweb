@@ -18,6 +18,8 @@ services:
       - app-network
     expose:
       - "8000"
+    ports:                # <-- Tashqi tarmoqqa port map qilish
+      - "8000:8000"
     command: >
       sh -c "python manage.py migrate --noinput &&
              python manage.py collectstatic --noinput &&
