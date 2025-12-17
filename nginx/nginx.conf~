@@ -12,13 +12,13 @@ http {
    # HTTP - avtomatik HTTPS ga yo'naltirish
    server {
        listen 80;
-        server_name sebmarket.uz www.sebmarket.uz;
-        location /.well-known/acme-challenge/ {
-            root /var/www/certbot;
-        }
-        location / {
-            return 301 https://$host$request_uri;
-        }
+       server_name sebmarket.uz www.sebmarket.uz;
+       location /.well-known/acme-challenge/ {
+           root /var/www/certbot;
+       }
+       location / {
+           return 301 https://$host$request_uri;
+       }
    }
 
    # HTTPS server
