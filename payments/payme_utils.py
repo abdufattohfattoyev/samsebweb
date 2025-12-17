@@ -1,0 +1,63 @@
+# payments/payme_utils.py
+import base64
+from django.conf import settings
+
+
+def create_payme_link(telegram_id, amount, order_id=None):
+    """
+    Payme to'lov havolasini yaratish (GET metodi)
+
+    Args:
+        telegram_id: Foydalanuvchi telegram ID
+        amount: Summa (so'mda)
+        order_id: Buyurtma ID (ixtiyoriy)
+
+    Returns:
+        str: To'lov havolasi
+
+    Misol:
+        link = create_payme_link(123456789, 5000)
+        # https://checkout.paycom.uz/bT01ODdmNzJj...
+    """
+    merchant_id = settings.PAYME_SETTINGS['MERCHANT_ID']
+
+    # Summa tiyinga (1 so'm = 100 tiyin)
+    amount_tiyin = int(amount * 100)
+
+    # Parametrlar: m=merchant_id;ac.telegram_id=123456789;a=500000
+    params = f"m={merchant_id};ac.telegram_id={telegram_id};a={amount_tiyin}"
+
+    # Base64 kodlash
+    encoded = base64.b64encode(params.encode('utf-8')).decode('utf-8')
+
+    # URL yaratish
+    url = f"https://checkout.paycom.uz/{encoded}"
+
+    return url
+
+
+def check_payme_auth(request):
+    """
+    Payme dan kelayotgan so'rovni tekshirish
+
+    Authorization: Basic base64(Paycom:SECRET_KEY)
+    """
+    auth = request.META.get('HTTP_AUTHORIZATION', '')
+
+    if not auth.startswith('Basic '):
+        return False
+
+    try:
+        # Base64 dan ochish
+        decoded = base64.b64decode(auth[6:]).decode('utf-8')
+        login, password = decoded.split(':', 1)
+
+        # Password SECRET_KEY bilan solishtirish
+        return password == settings.PAYME_SETTINGS['SECRET_KEY']
+    except:
+        return False
+
+
+def tiyin_to_sum(amount_tiyin):
+    """Tiyindan so'mga o'tkazish"""
+    return amount_tiyin / 100
