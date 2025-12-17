@@ -16,7 +16,7 @@ services:
       - app-network
 
   nginx:
-#    image: nginx:latest
+    image: nginx:latest
     ports:
       - "80:80"
       - "443:443"
