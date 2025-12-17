@@ -13,7 +13,7 @@ from rest_framework import status
 
 from config import settings
 from .models import BotUser, Payment, PricingTariff, PricingHistory
-from .payme_utils import create_payme_link, check_payme_auth
+from .payme_utils import create_payme_link, check_payme_auth, tiyin_to_sum
 
 logger = logging.getLogger(__name__)
 
