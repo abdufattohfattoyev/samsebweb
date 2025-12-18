@@ -7,14 +7,18 @@ def create_payme_link(telegram_id, amount):
     """
     Payme to'lov havolasini yaratish
 
-    Payme menejerda account parametr: telegram_id
+    Payme menejeriga account parametr sifatida FAQAT telegram_id berilgan!
 
     Args:
-        telegram_id: Foydalanuvchi telegram ID
+        telegram_id: Foydalanuvchi telegram ID (account parametr)
         amount: Summa (so'mda)
 
     Returns:
         str: To'lov havolasi
+
+    Misol:
+        link = create_payme_link(123456789, 5000)
+        # m=merchant;ac.telegram_id=123456789;a=500000
     """
     merchant_id = settings.PAYME_SETTINGS['MERCHANT_ID']
 
@@ -51,7 +55,7 @@ def check_payme_auth(request):
 
         # Password SECRET_KEY bilan solishtirish
         return password == settings.PAYME_SETTINGS['SECRET_KEY']
-    except Exception:
+    except:
         return False
 
 

@@ -11,7 +11,7 @@ from rest_framework.decorators import api_view
 from rest_framework.response import Response
 from rest_framework import status
 
-from config import settings
+from django.conf import settings
 from .models import BotUser, Payment, PricingTariff, PricingHistory
 from .payme_utils import create_payme_link, check_payme_auth, tiyin_to_sum
 
@@ -26,19 +26,6 @@ def get_tariffs(request):
     Barcha faol tariflarni olish
 
     GET /api/payments/tariffs/
-
-    Response:
-    {
-        "success": true,
-        "tariffs": [
-            {
-                "id": 1,
-                "name": "1 ta narxlash",
-                "count": 1,
-                "price": 5000.0
-            }
-        ]
-    }
     """
     tariffs = PricingTariff.objects.filter(is_active=True).order_by('count')
 
@@ -62,19 +49,6 @@ def create_user(request):
     Foydalanuvchi yaratish yoki yangilash
 
     POST /api/payments/user/create/
-    Body:
-    {
-        "telegram_id": 123456789,
-        "full_name": "Test User",
-        "username": "testuser"
-    }
-
-    Response:
-    {
-        "success": true,
-        "telegram_id": 123456789,
-        "balance": 0
-    }
     """
     telegram_id = request.data.get('telegram_id')
     full_name = request.data.get('full_name', '')
@@ -120,13 +94,6 @@ def get_balance(request, telegram_id):
     Foydalanuvchi balansini olish
 
     GET /api/payments/user/{telegram_id}/balance/
-
-    Response:
-    {
-        "success": true,
-        "balance": 5,
-        "full_name": "Test User"
-    }
     """
     try:
         user = BotUser.objects.get(telegram_id=telegram_id)
@@ -150,19 +117,6 @@ def use_pricing(request):
     Narxlashdan foydalanish (balansni kamaytirish)
 
     POST /api/payments/pricing/use/
-    Body:
-    {
-        "telegram_id": 123456789,
-        "phone_model": "iPhone 15 Pro Max",
-        "price": 15000000
-    }
-
-    Response:
-    {
-        "success": true,
-        "balance": 4,
-        "message": "Muvaffaqiyatli"
-    }
     """
     telegram_id = request.data.get('telegram_id')
     phone_model = request.data.get('phone_model', '')
@@ -233,7 +187,8 @@ def create_payment(request):
         "payment_id": 1,
         "payment_url": "https://checkout.paycom.uz/...",
         "amount": 5000.0,
-        "count": 1
+        "count": 1,
+        "tariff_name": "1 ta narxlash"
     }
     """
     telegram_id = request.data.get('telegram_id')
@@ -258,11 +213,10 @@ def create_payment(request):
             state=Payment.STATE_CREATED
         )
 
-        # Payme havolasi
+        # Payme havolasi - FAQAT telegram_id
         payme_url = create_payme_link(
             telegram_id=telegram_id,
-            amount=tariff.price,
-            order_id=payment.id
+            amount=float(tariff.price)
         )
 
         logger.info(f"Payment created: #{payment.id} for user {telegram_id}")
@@ -292,6 +246,42 @@ def create_payment(request):
             'success': False,
             'error': 'To\'lov yaratishda xatolik'
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(['GET'])
+def check_payment_status(request, telegram_id):
+    """
+    Telegram ID bo'yicha oxirgi to'lov holatini tekshirish
+
+    GET /api/payments/payment/status/{telegram_id}/
+    """
+    try:
+        user = BotUser.objects.get(telegram_id=telegram_id)
+
+        # Oxirgi to'lovni topish
+        payment = Payment.objects.filter(user=user).order_by('-created_at').first()
+
+        if not payment:
+            return Response({
+                'success': False,
+                'error': 'To\'lov topilmadi'
+            }, status=status.HTTP_404_NOT_FOUND)
+
+        return Response({
+            'success': True,
+            'payment_id': payment.id,
+            'state': payment.state,
+            'state_display': payment.get_state_display(),
+            'amount': float(payment.amount),
+            'count': payment.pricing_count,
+            'created_at': payment.created_at.isoformat(),
+            'performed_at': payment.performed_at.isoformat() if payment.performed_at else None
+        })
+    except BotUser.DoesNotExist:
+        return Response({
+            'success': False,
+            'error': 'Foydalanuvchi topilmadi'
+        }, status=status.HTTP_404_NOT_FOUND)
 
 
 # ============= PAYME MERCHANT API =============
@@ -339,13 +329,25 @@ def payme_callback(request):
 
         handler = handlers.get(method)
         if handler:
-            response = handler(params)
-            # Request ID ni qo'shish
-            if isinstance(response, JsonResponse):
-                response_data = json.loads(response.content)
-                response_data['id'] = request_id
-                return JsonResponse(response_data)
-            return response
+            result = handler(params)
+
+            # result bu dict bo'lsa, to'g'ri format bilan qaytarish
+            if isinstance(result, dict):
+                if 'error' in result:
+                    return JsonResponse({
+                        'error': result['error'],
+                        'id': request_id
+                    })
+                else:
+                    return JsonResponse({
+                        'result': result,
+                        'id': request_id
+                    })
+
+            # Agar JsonResponse bo'lsa, id qo'shish
+            response_data = json.loads(result.content)
+            response_data['id'] = request_id
+            return JsonResponse(response_data)
         else:
             return JsonResponse({
                 'error': {
@@ -383,6 +385,7 @@ def payme_callback(request):
             }
         })
 
+
 def check_perform_transaction(params):
     """1. CheckPerformTransaction - To'lov mumkinligini tekshirish"""
     amount = params.get('amount')
@@ -390,38 +393,40 @@ def check_perform_transaction(params):
     telegram_id = account.get('telegram_id')
 
     if not telegram_id:
-        return JsonResponse({
+        return {
             'error': {
                 'code': -31050,
                 'message': {
-                    'uz': 'Foydalanuvchi topilmadi',
-                    'ru': 'Пользователь не найден',
-                    'en': 'User not found'
+                    'uz': 'telegram_id topilmadi',
+                    'ru': 'telegram_id не найден',
+                    'en': 'telegram_id not found'
                 }
             }
-        })
+        }
 
     try:
         user = BotUser.objects.get(telegram_id=telegram_id)
 
-        # Minimal summa tekshiruvi
-        min_amount_tiyin = settings.PAYME_SETTINGS['MIN_AMOUNT'] * 100
+        # Minimal summa tekshiruvi (agar kerak bo'lsa)
+        min_amount = getattr(settings, 'PAYME_MIN_AMOUNT', 1000)
+        min_amount_tiyin = min_amount * 100
+
         if amount < min_amount_tiyin:
-            return JsonResponse({
+            return {
                 'error': {
                     'code': -31001,
                     'message': {
-                        'uz': f"Minimal summa {settings.PAYME_SETTINGS['MIN_AMOUNT']} so'm",
-                        'ru': f"Минимальная сумма {settings.PAYME_SETTINGS['MIN_AMOUNT']}",
-                        'en': f"Minimum amount {settings.PAYME_SETTINGS['MIN_AMOUNT']}"
+                        'uz': f"Minimal summa {min_amount} so'm",
+                        'ru': f"Минимальная сумма {min_amount}",
+                        'en': f"Minimum amount {min_amount}"
                     }
                 }
-            })
+            }
 
-        return JsonResponse({'result': {'allow': True}})
+        return {'allow': True}
 
     except BotUser.DoesNotExist:
-        return JsonResponse({
+        return {
             'error': {
                 'code': -31050,
                 'message': {
@@ -430,7 +435,7 @@ def check_perform_transaction(params):
                     'en': 'User not found'
                 }
             }
-        })
+        }
 
 
 def create_transaction(params):
@@ -447,29 +452,20 @@ def create_transaction(params):
         existing = Payment.objects.filter(payme_transaction_id=payme_id).first()
 
         if existing:
-            if existing.state == Payment.STATE_CREATED:
-                return JsonResponse({
-                    'result': {
-                        'create_time': int(existing.created_at.timestamp() * 1000),
-                        'transaction': str(existing.id),
-                        'state': existing.state
-                    }
-                })
-            else:
-                return JsonResponse({
-                    'error': {
-                        'code': -31008,
-                        'message': {
-                            'uz': 'Tranzaksiya mavjud',
-                            'ru': 'Транзакция существует',
-                            'en': 'Transaction exists'
-                        }
-                    }
-                })
+            return {
+                'create_time': int(existing.created_at.timestamp() * 1000),
+                'transaction': str(existing.id),
+                'state': existing.state
+            }
 
-        # Yangi to'lov
+        # Yangi to'lov yaratish
+        # Summa so'mda
         amount_sum = tiyin_to_sum(amount)
-        pricing_count = int(amount_sum / 5000)
+
+        # Tarif orqali pricing_count aniqlash
+        # Yoki to'g'ridan-to'g'ri hisoblash
+        # Masalan: amount_sum / 5000 = pricing_count
+        pricing_count = int(amount_sum / 5000) if amount_sum >= 5000 else 1
 
         with db_transaction.atomic():
             payment = Payment.objects.create(
@@ -482,16 +478,14 @@ def create_transaction(params):
 
         logger.info(f"Transaction created: {payme_id} -> Payment #{payment.id}")
 
-        return JsonResponse({
-            'result': {
-                'create_time': int(payment.created_at.timestamp() * 1000),
-                'transaction': str(payment.id),
-                'state': payment.state
-            }
-        })
+        return {
+            'create_time': int(payment.created_at.timestamp() * 1000),
+            'transaction': str(payment.id),
+            'state': payment.state
+        }
 
     except BotUser.DoesNotExist:
-        return JsonResponse({
+        return {
             'error': {
                 'code': -31050,
                 'message': {
@@ -500,10 +494,10 @@ def create_transaction(params):
                     'en': 'User not found'
                 }
             }
-        })
+        }
     except Exception as e:
         logger.error(f"Create transaction error: {e}", exc_info=True)
-        return JsonResponse({
+        return {
             'error': {
                 'code': -31008,
                 'message': {
@@ -512,7 +506,7 @@ def create_transaction(params):
                     'en': 'Error'
                 }
             }
-        })
+        }
 
 
 def perform_transaction(params):
@@ -532,27 +526,23 @@ def perform_transaction(params):
                 payment.user.balance += payment.pricing_count
                 payment.user.save()
 
-            logger.info(f"Transaction performed: {payme_id} -> Payment #{payment.id}")
+            logger.info(f"Transaction performed: {payme_id} -> Payment #{payment.id}, balance +{payment.pricing_count}")
 
-            return JsonResponse({
-                'result': {
-                    'transaction': str(payment.id),
-                    'perform_time': int(payment.performed_at.timestamp() * 1000),
-                    'state': payment.state
-                }
-            })
+            return {
+                'transaction': str(payment.id),
+                'perform_time': int(payment.performed_at.timestamp() * 1000),
+                'state': payment.state
+            }
 
         elif payment.state == Payment.STATE_COMPLETED:
-            return JsonResponse({
-                'result': {
-                    'transaction': str(payment.id),
-                    'perform_time': int(payment.performed_at.timestamp() * 1000),
-                    'state': payment.state
-                }
-            })
+            return {
+                'transaction': str(payment.id),
+                'perform_time': int(payment.performed_at.timestamp() * 1000),
+                'state': payment.state
+            }
 
         else:
-            return JsonResponse({
+            return {
                 'error': {
                     'code': -31008,
                     'message': {
@@ -561,10 +551,10 @@ def perform_transaction(params):
                         'en': 'Cannot perform'
                     }
                 }
-            })
+            }
 
     except Payment.DoesNotExist:
-        return JsonResponse({
+        return {
             'error': {
                 'code': -31003,
                 'message': {
@@ -573,7 +563,7 @@ def perform_transaction(params):
                     'en': 'Transaction not found'
                 }
             }
-        })
+        }
 
 
 def cancel_transaction(params):
@@ -602,16 +592,14 @@ def cancel_transaction(params):
 
         logger.info(f"Transaction cancelled: {payme_id}, reason={reason}")
 
-        return JsonResponse({
-            'result': {
-                'transaction': str(payment.id),
-                'cancel_time': int(payment.cancelled_at.timestamp() * 1000),
-                'state': payment.state
-            }
-        })
+        return {
+            'transaction': str(payment.id),
+            'cancel_time': int(payment.cancelled_at.timestamp() * 1000),
+            'state': payment.state
+        }
 
     except Payment.DoesNotExist:
-        return JsonResponse({
+        return {
             'error': {
                 'code': -31003,
                 'message': {
@@ -620,7 +608,7 @@ def cancel_transaction(params):
                     'en': 'Transaction not found'
                 }
             }
-        })
+        }
 
 
 def check_transaction(params):
@@ -645,10 +633,10 @@ def check_transaction(params):
         if payment.reason:
             result['reason'] = payment.reason
 
-        return JsonResponse({'result': result})
+        return result
 
     except Payment.DoesNotExist:
-        return JsonResponse({
+        return {
             'error': {
                 'code': -31003,
                 'message': {
@@ -657,4 +645,4 @@ def check_transaction(params):
                     'en': 'Transaction not found'
                 }
             }
-        })
+        }

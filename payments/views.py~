@@ -297,26 +297,13 @@ def create_payment(request):
 # ============= PAYME MERCHANT API =============
 
 @csrf_exempt
-@require_http_methods(["POST", "GET"])
+@require_http_methods(["POST"])
 def payme_callback(request):
     """
     Payme Merchant API callback endpoint
 
     POST /api/payments/payme/callback/
     """
-
-    # GET so‘rovlar uchun javob
-    if request.method == "GET":
-        return JsonResponse({
-            "error": {
-                "code": 405,
-                "message": {
-                    "uz": "POST metodini ishlating",
-                    "ru": "Используйте метод POST",
-                    "en": "Use POST method"
-                }
-            }
-        }, status=405)
 
     # 1. Autentifikatsiya
     if not check_payme_auth(request):
@@ -330,25 +317,11 @@ def payme_callback(request):
                     'en': "Insufficient privileges"
                 }
             }
-        }, status=403)
+        })
 
     try:
         # 2. JSON parse
-        try:
-            data = json.loads(request.body)
-        except json.JSONDecodeError:
-            logger.warning("Payme: JSON parsing error")
-            return JsonResponse({
-                'error': {
-                    'code': -32700,
-                    'message': {
-                        'uz': "JSON xato",
-                        'ru': "Ошибка парсинга",
-                        'en': "Parse error"
-                    }
-                }
-            }, status=400)
-
+        data = json.loads(request.body)
         method = data.get('method')
         params = data.get('params', {})
         request_id = data.get('id')
@@ -365,8 +338,15 @@ def payme_callback(request):
         }
 
         handler = handlers.get(method)
-        if not handler:
-            logger.warning(f"Payme: Method not found - {method}")
+        if handler:
+            response = handler(params)
+            # Request ID ni qo'shish
+            if isinstance(response, JsonResponse):
+                response_data = json.loads(response.content)
+                response_data['id'] = request_id
+                return JsonResponse(response_data)
+            return response
+        else:
             return JsonResponse({
                 'error': {
                     'code': -32601,
@@ -377,20 +357,21 @@ def payme_callback(request):
                     }
                 },
                 'id': request_id
-            }, status=400)
+            })
 
-        response = handler(params)
-
-        # Request ID ni qo‘shish
-        if isinstance(response, JsonResponse):
-            response_data = json.loads(response.content)
-            response_data['id'] = request_id
-            return JsonResponse(response_data)
-
-        return response
-
+    except json.JSONDecodeError:
+        return JsonResponse({
+            'error': {
+                'code': -32700,
+                'message': {
+                    'uz': 'JSON xato',
+                    'ru': 'Ошибка парсинга',
+                    'en': 'Parse error'
+                }
+            }
+        })
     except Exception as e:
-        logger.error(f"Payme callback internal error: {e}", exc_info=True)
+        logger.error(f"Payme callback error: {e}", exc_info=True)
         return JsonResponse({
             'error': {
                 'code': -32400,
@@ -399,10 +380,8 @@ def payme_callback(request):
                     'ru': 'Внутренняя ошибка',
                     'en': 'Internal error'
                 }
-            },
-            'id': data.get('id') if 'data' in locals() else None
-        }, status=500)
-
+            }
+        })
 
 def check_perform_transaction(params):
     """1. CheckPerformTransaction - To'lov mumkinligini tekshirish"""
