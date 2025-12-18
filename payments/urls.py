@@ -1,16 +1,26 @@
-# payments/urls.py
+# payments/urls.py - TO'LIQ KONFIGURATSIYA
 from django.urls import path
 from . import views
 
+app_name = 'payments'
+
 urlpatterns = [
-    # Bot API endpoints
+    # ============= BOT API ENDPOINTLAR =============
+
+    # Tariflar
     path('tariffs/', views.get_tariffs, name='get_tariffs'),
+
+    # Foydalanuvchi
     path('user/create/', views.create_user, name='create_user'),
     path('user/<int:telegram_id>/balance/', views.get_balance, name='get_balance'),
-    path('pricing/use/', views.use_pricing, name='use_pricing'),
-    # path('payment/create-for-tariff/', views.create_payment_for_tariff, name='create_payment_for_tariff'),
-    path('payment/check-last/<int:telegram_id>/', views.check_last_payment_status, name='check_last_payment_status'),
 
-    # Payme callback
+    # Narxlash
+    path('pricing/use/', views.use_pricing, name='use_pricing'),
+
+    # To'lov yaratish va tekshirish
+    path('payment/create/', views.create_payment, name='create_payment'),
+    path('payment/status/<int:telegram_id>/', views.check_payment_status, name='check_payment_status'),
+
+    # ============= PAYME MERCHANT API =============
     path('payme/callback/', views.payme_callback, name='payme_callback'),
 ]
