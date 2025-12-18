@@ -784,3 +784,50 @@ def check_transaction(params):
                 'message': str(e)[:100]
             }
         }
+
+
+# payments/views.py ga qo'shimcha funksiya (agar kerak bo'lsa)
+@api_view(['GET'])
+def check_last_payment_status(request, telegram_id):
+    """
+    Oxirgi to'lov holatini tekshirish (5 daqiqa ichida)
+    """
+    try:
+        user = BotUser.objects.get(telegram_id=telegram_id)
+
+        # 5 daqiqa ichidagi oxirgi to'lovni topish
+        time_threshold = timezone.now() - timezone.timedelta(minutes=5)
+        payment = Payment.objects.filter(
+            user=user,
+            created_at__gte=time_threshold
+        ).order_by('-created_at').first()
+
+        if not payment:
+            return Response({
+                'success': False,
+                'error': 'Yaqinda to\'lov topilmadi',
+                'has_payment': False
+            })
+
+        return Response({
+            'success': True,
+            'payment_id': payment.id,
+            'state': payment.state,
+            'state_display': payment.get_state_display(),
+            'amount': float(payment.amount),
+            'count': payment.pricing_count,
+            'balance': user.balance,
+            'has_payment': True
+        })
+
+    except BotUser.DoesNotExist:
+        return Response({
+            'success': False,
+            'error': 'Foydalanuvchi topilmadi'
+        }, status=404)
+    except Exception as e:
+        logger.error(f"Check last payment status error: {e}")
+        return Response({
+            'success': False,
+            'error': str(e)
+        }, status=500)

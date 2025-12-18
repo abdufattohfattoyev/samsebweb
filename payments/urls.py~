@@ -8,6 +8,7 @@ urlpatterns = [
     path('user/create/', views.create_user, name='create_user'),
     path('user/<int:telegram_id>/balance/', views.get_balance, name='get_balance'),
     path('pricing/use/', views.use_pricing, name='use_pricing'),
+    path('payment/create-for-tariff/', views.create_payment_for_tariff, name='create_payment_for_tariff'),
     path('payment/check-last/<int:telegram_id>/', views.check_last_payment_status, name='check_last_payment_status'),
 
     # Payme callback
