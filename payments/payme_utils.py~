@@ -1,4 +1,4 @@
-# payments/payme_utils.py
+# payments/payme_utils.py - YANGILANGAN VERSIYA
 import base64
 from django.conf import settings
 
@@ -7,63 +7,70 @@ def create_payme_link(telegram_id, amount):
     """
     Payme to'lov havolasini yaratish
 
-    Payme menejeriga account parametr sifatida FAQAT telegram_id berilgan!
-
     Args:
-        telegram_id: Foydalanuvchi telegram ID (account parametr)
+        telegram_id: Foydalanuvchi telegram ID
         amount: Summa (so'mda)
 
     Returns:
         str: To'lov havolasi
-
-    Misol:
-        link = create_payme_link(123456789, 5000)
-        # m=merchant;ac.telegram_id=123456789;a=500000
     """
-    merchant_id = settings.PAYME_SETTINGS['MERCHANT_ID']
+    try:
+        merchant_id = settings.PAYME_SETTINGS['MERCHANT_ID']
 
-    # Summa tiyinga (1 so'm = 100 tiyin)
-    amount_tiyin = int(amount * 100)
+        # Summa tiyinga (1 so'm = 100 tiyin)
+        amount_tiyin = int(float(amount) * 100)
 
-    # FAQAT telegram_id account parametr sifatida
-    params = f"m={merchant_id};ac.telegram_id={telegram_id};a={amount_tiyin}"
+        # Account parametrlarini to'g'ri formatda
+        params = f"m={merchant_id};ac.telegram_id={telegram_id};a={amount_tiyin}"
 
-    # Base64 kodlash
-    encoded = base64.b64encode(params.encode('utf-8')).decode('utf-8')
+        # Base64 kodlash
+        encoded = base64.b64encode(params.encode('utf-8')).decode('utf-8')
 
-    # URL yaratish
-    url = f"https://checkout.paycom.uz/{encoded}"
+        # URL yaratish
+        url = f"https://checkout.paycom.uz/{encoded}"
 
-    return url
+        print(f"Payme URL created: {url}")  # Debug uchun
+
+        return url
+    except Exception as e:
+        print(f"Error creating Payme link: {e}")
+        return ""
 
 
 def check_payme_auth(request):
     """
     Payme dan kelayotgan so'rovni tekshirish
-
-    Authorization: Basic base64(Paycom:SECRET_KEY)
     """
-    auth = request.META.get('HTTP_AUTHORIZATION', '')
+    auth_header = request.META.get('HTTP_AUTHORIZATION', '')
 
-    if not auth.startswith('Basic '):
+    if not auth_header.startswith('Basic '):
         return False
 
     try:
         # Base64 dan ochish
-        decoded = base64.b64decode(auth[6:]).decode('utf-8')
-        login, password = decoded.split(':', 1)
+        encoded_credentials = auth_header.split(' ')[1]
+        decoded_credentials = base64.b64decode(encoded_credentials).decode('utf-8')
 
-        # Password SECRET_KEY bilan solishtirish
-        return password == settings.PAYME_SETTINGS['SECRET_KEY']
-    except:
+        # Format: "Paycom:your_secret_key"
+        expected_credentials = f"Paycom:{settings.PAYME_SETTINGS['SECRET_KEY']}"
+
+        return decoded_credentials == expected_credentials
+    except Exception as e:
+        print(f"Auth error: {e}")
         return False
 
 
 def tiyin_to_sum(amount_tiyin):
     """Tiyindan so'mga o'tkazish"""
-    return amount_tiyin / 100
+    try:
+        return float(amount_tiyin) / 100.0
+    except:
+        return 0
 
 
 def sum_to_tiyin(amount_sum):
     """So'mdan tiyinga o'tkazish"""
-    return int(amount_sum * 100)
+    try:
+        return int(float(amount_sum) * 100)
+    except:
+        return 0
