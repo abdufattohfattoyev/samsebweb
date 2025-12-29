@@ -1,119 +1,90 @@
-# payments/payme_utils.py - TEST VA PRODUCTION REJIMI
+# payments/payme_utils.py
 import base64
-import json
+import time
 from django.conf import settings
 
 
-def create_payme_link(telegram_id, amount):
+def create_payme_link(telegram_id, amount, order_id=None):
     """
-    Payme to'lov havolasini yaratish
+    Payme to'lov havolasini yaratish (TO‘G‘RI FORMAT)
 
     Args:
-        telegram_id: Foydalanuvchi telegram ID (int yoki str)
-        amount: Summa (so'mda, float)
-
-    Returns:
-        str: Payme to'lov havolasi
+        telegram_id: Telegram user ID
+        amount: so'mda (float yoki int)
+        order_id: UNIQUE chek ID (ixtiyoriy, bo‘lmasa avtomatik yaratiladi)
     """
+
     try:
-        # Settings dan merchant_id ni olish
         merchant_id = getattr(settings, 'PAYME_MERCHANT_ID', '')
-
-        # ⚠️ TEST REJIMI - agar merchant_id yo'q bo'lsa, test URL qaytarish
         if not merchant_id:
-            print("⚠️ WARNING: PAYME_MERCHANT_ID not configured, using TEST mode")
-            # Test uchun fake URL (bu URL ishlamaydi, faqat test uchun)
-            test_url = f"https://checkout.test.paycom.uz?amount={amount}&telegram_id={telegram_id}&test=true"
-            print(f"🧪 TEST Payme URL: {test_url}")
-            return test_url
+            raise ValueError("PAYME_MERCHANT_ID not configured")
 
-        # Summa tiyinga (1 so'm = 100 tiyin)
-        try:
-            amount_float = float(amount)
-            amount_tiyin = int(amount_float * 100)
-        except (ValueError, TypeError):
-            print(f"ERROR: Invalid amount: {amount}")
-            return ""
+        # 🔑 UNIQUE ORDER ID (chek)
+        if not order_id:
+            order_id = int(time.time() * 1000)  # unique ID
 
-        # Account parametrlari - FAQAT telegram_id
-        account_params = {
-            'telegram_id': str(telegram_id)
-        }
+        # 💰 so'm → tiyin
+        amount_tiyin = int(float(amount) * 100)
 
-        # Parametrlarni string formatga o'tkazish
-        params_list = [f"m={merchant_id}"]
+        # 📌 PARAMETRLAR (PAYME TALABI)
+        params_list = [
+            f"m={merchant_id}",
+            f"ac.order_id={order_id}",          # 🔴 MAJBURIY
+            f"ac.telegram_id={telegram_id}",    # ✅ ruxsat etilgan
+            f"a={amount_tiyin}",
+        ]
 
-        # Account parametrlarini qo'shish
-        for key, value in account_params.items():
-            if value:
-                params_list.append(f"ac.{key}={value}")
-
-        # Summa parametri
-        params_list.append(f"a={amount_tiyin}")
-
-        # Barcha parametrlarni birlashtirish
         params_str = ";".join(params_list)
 
-        # Base64 kodlash
-        encoded = base64.b64encode(params_str.encode('utf-8')).decode('utf-8')
+        # 🔐 Base64 encode
+        encoded = base64.b64encode(
+            params_str.encode("utf-8")
+        ).decode("utf-8")
 
-        # URL yaratish
         url = f"https://checkout.paycom.uz/{encoded}"
 
-        print(f"✅ Payme URL created: {url}")
-        print(f"📋 Params: {params_str}")
+        print("✅ PAYME URL:", url)
+        print("📋 PAYME PARAMS:", params_str)
 
         return url
 
     except Exception as e:
-        print(f"❌ ERROR creating Payme link: {e}")
-        # Xatolik bo'lsa ham test URL qaytarish
-        test_url = f"https://checkout.test.paycom.uz?error=true&amount={amount}&telegram_id={telegram_id}"
-        return test_url
+        print("❌ PAYME LINK ERROR:", e)
+        return ""
 
 
 def check_payme_auth(request):
     """
-    Payme dan kelayotgan so'rovni autentifikatsiya qilish
+    Payme callback autentifikatsiyasi
     """
     try:
-        auth_header = request.META.get('HTTP_AUTHORIZATION', '')
+        auth_header = request.META.get("HTTP_AUTHORIZATION", "")
 
-        if not auth_header.startswith('Basic '):
-            print(f"Invalid auth header: {auth_header[:50]}...")
+        if not auth_header.startswith("Basic "):
             return False
 
-        encoded_credentials = auth_header.split(' ')[1]
-        decoded_credentials = base64.b64decode(encoded_credentials).decode('utf-8')
+        encoded = auth_header.split(" ")[1]
+        decoded = base64.b64decode(encoded).decode("utf-8")
 
-        secret_key = getattr(settings, 'PAYME_SECRET_KEY', '')
+        secret_key = getattr(settings, "PAYME_SECRET_KEY", "")
         if not secret_key:
-            print("ERROR: PAYME_SECRET_KEY not configured")
             return False
 
-        expected_credentials = f"Paycom:{secret_key}"
-        is_valid = decoded_credentials == expected_credentials
-
-        if not is_valid:
-            print(f"Invalid credentials. Expected: {expected_credentials}, Got: {decoded_credentials}")
-
-        return is_valid
+        return decoded == f"Paycom:{secret_key}"
 
     except Exception as e:
-        print(f"ERROR checking Payme auth: {e}")
+        print("❌ PAYME AUTH ERROR:", e)
         return False
 
 
 def tiyin_to_sum(amount_tiyin):
-    """Tiyindan so'mga o'tkazish"""
     try:
-        return float(amount_tiyin) / 100.0
+        return float(amount_tiyin) / 100
     except:
         return 0.0
 
 
 def sum_to_tiyin(amount_sum):
-    """So'mdan tiyinga o'tkazish"""
     try:
         return int(float(amount_sum) * 100)
     except:
@@ -121,16 +92,18 @@ def sum_to_tiyin(amount_sum):
 
 
 def decode_payme_params(params_base64):
-    """Payme parametrlarini decode qilish (debug uchun)"""
+    """
+    Debug uchun: Base64 → parametrlar
+    """
     try:
-        decoded = base64.b64decode(params_base64).decode('utf-8')
-        params = {}
+        decoded = base64.b64decode(params_base64).decode("utf-8")
+        result = {}
 
-        for param in decoded.split(';'):
-            if '=' in param:
-                key, value = param.split('=', 1)
-                params[key] = value
+        for item in decoded.split(";"):
+            if "=" in item:
+                k, v = item.split("=", 1)
+                result[k] = v
 
-        return params
+        return result
     except:
         return {}

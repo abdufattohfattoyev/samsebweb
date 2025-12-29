@@ -1,4 +1,6 @@
 # payments/models.py
+import uuid
+
 from django.db import models
 from django.utils import timezone
 from django.core.validators import MinValueValidator
@@ -98,25 +100,38 @@ class BotUser(models.Model):
 
 
 class Payment(models.Model):
-    """To'lovlar tarixi"""
+    """To'lovlar tarixi (Payme mos)"""
+
+    # ===== PAYME STATE =====
     STATE_CREATED = 1
     STATE_COMPLETED = 2
     STATE_CANCELLED = -1
     STATE_CANCELLED_AFTER_COMPLETE = -2
 
     STATE_CHOICES = [
-        (STATE_CREATED, 'Yaratildi'),
-        (STATE_COMPLETED, 'To\'landi'),
-        (STATE_CANCELLED, 'Bekor qilindi'),
-        (STATE_CANCELLED_AFTER_COMPLETE, 'To\'lovdan keyin bekor qilindi'),
+        (STATE_CREATED, "Yaratildi"),
+        (STATE_COMPLETED, "To'landi"),
+        (STATE_CANCELLED, "Bekor qilindi"),
+        (STATE_CANCELLED_AFTER_COMPLETE, "To'lovdan keyin bekor qilindi"),
     ]
 
+    # ===== 🔴 MAJBURIY: PAYME ORDER ID =====
+    order_id = models.CharField(
+        max_length=64,
+        unique=True,
+        db_index=True,
+        default=uuid.uuid4,
+        verbose_name="Chek ID (Payme)"
+    )
+
+    # ===== ALOQALAR =====
     user = models.ForeignKey(
         BotUser,
         on_delete=models.CASCADE,
-        related_name='payments',
+        related_name="payments",
         verbose_name="Foydalanuvchi"
     )
+
     tariff = models.ForeignKey(
         PricingTariff,
         on_delete=models.SET_NULL,
@@ -124,18 +139,21 @@ class Payment(models.Model):
         blank=True,
         verbose_name="Tarif"
     )
+
+    # ===== SUMMA =====
     amount = models.DecimalField(
-        max_digits=10,
+        max_digits=12,
         decimal_places=2,
         validators=[MinValueValidator(0)],
         verbose_name="Summa (so'm)"
     )
-    pricing_count = models.IntegerField(
+
+    pricing_count = models.PositiveIntegerField(
         validators=[MinValueValidator(1)],
         verbose_name="Narxlashlar soni"
     )
 
-    # Payme uchun maydonlar
+    # ===== PAYME TRANSACTION =====
     payme_transaction_id = models.CharField(
         max_length=255,
         null=True,
@@ -144,6 +162,7 @@ class Payment(models.Model):
         db_index=True,
         verbose_name="Payme tranzaksiya ID"
     )
+
     state = models.IntegerField(
         choices=STATE_CHOICES,
         default=STATE_CREATED,
@@ -151,6 +170,7 @@ class Payment(models.Model):
         verbose_name="Holati"
     )
 
+    # ===== VAQT MAYDONLARI =====
     created_at = models.DateTimeField(auto_now_add=True, verbose_name="Yaratilgan")
     performed_at = models.DateTimeField(null=True, blank=True, verbose_name="To'langan vaqt")
     cancelled_at = models.DateTimeField(null=True, blank=True, verbose_name="Bekor qilingan vaqt")
@@ -159,42 +179,66 @@ class Payment(models.Model):
     class Meta:
         verbose_name = "To'lov"
         verbose_name_plural = "To'lovlar"
-        ordering = ['-created_at']
-        db_table = 'payments'
+        ordering = ["-created_at"]
+        db_table = "payments"
         indexes = [
-            models.Index(fields=['state', 'created_at']),
-            models.Index(fields=['user', 'state']),
+            models.Index(fields=["order_id"]),
+            models.Index(fields=["state", "created_at"]),
+            models.Index(fields=["user", "state"]),
         ]
 
     def __str__(self):
-        return f"#{self.id} - {self.user.full_name} - {self.amount:,.0f} so'm"
+        return f"#{self.order_id} | {self.user.full_name} | {self.amount:,.0f} so'm"
 
-    def complete_payment(self):
-        """To'lovni tasdiqlash va balansga qo'shish"""
-        if self.state == self.STATE_CREATED:
-            self.state = self.STATE_COMPLETED
-            self.performed_at = timezone.now()
-            self.save(update_fields=['state', 'performed_at'])
-            # Balansga qo'shish
-            self.user.add_balance(self.pricing_count)
-            return True
-        return False
+    # ===== TO‘LOVNI TASDIQLASH =====
+    def complete_payment(self, transaction_id=None):
+        """
+        Payme PerformTransaction uchun
+        """
+        # 🔐 Idempotent himoya
+        if self.state != self.STATE_CREATED:
+            return False
 
+        if transaction_id:
+            self.payme_transaction_id = transaction_id
+
+        self.state = self.STATE_COMPLETED
+        self.performed_at = timezone.now()
+        self.save(update_fields=[
+            "state",
+            "performed_at",
+            "payme_transaction_id"
+        ])
+
+        # Balansga qo‘shish
+        self.user.add_balance(self.pricing_count)
+        return True
+
+    # ===== TO‘LOVNI BEKOR QILISH =====
     def cancel_payment(self, reason=None):
-        """To'lovni bekor qilish"""
+        """
+        Payme CancelTransaction uchun
+        """
         if self.state == self.STATE_CREATED:
             self.state = self.STATE_CANCELLED
+
         elif self.state == self.STATE_COMPLETED:
             self.state = self.STATE_CANCELLED_AFTER_COMPLETE
+
             # Balansni qaytarish
             if self.user.balance >= self.pricing_count:
                 self.user.balance -= self.pricing_count
-                self.user.save(update_fields=['balance', 'updated_at'])
+                self.user.save(update_fields=["balance", "updated_at"])
 
         self.cancelled_at = timezone.now()
-        if reason:
+        if reason is not None:
             self.reason = reason
-        self.save(update_fields=['state', 'cancelled_at', 'reason'])
+
+        self.save(update_fields=[
+            "state",
+            "cancelled_at",
+            "reason"
+        ])
         return True
 
 
