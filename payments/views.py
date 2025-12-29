@@ -422,23 +422,42 @@ def payme_callback(request):
 
 # ============= PAYME METHODS =============
 
+
 def check_perform_transaction(params):
-    """Buyurtma mavjudligini tekshirish"""
+    """
+    Buyurtma mavjudligini tekshirish
+
+    Payme yuboradi:
+    {
+        "amount": 5000,
+        "account": {
+            "order_id": "...",       // Majburiy!
+            "telegram_id": 123456789  // Ixtiyoriy
+        }
+    }
+    """
     try:
         account = params.get('account', {})
         order_id = account.get('order_id')
+        amount = params.get('amount')
 
-        logger.info(f"CheckPerformTransaction: order_id={order_id}")
+        logger.info(f"CheckPerformTransaction: order_id={order_id}, amount={amount}")
 
+        # 1. order_id MAJBURIY tekshirish
         if not order_id:
+            logger.warning(f"Order ID missing in account params")
             return {
                 'error': {
                     'code': -31050,
-                    'message': 'Order ID required'
+                    'message': {
+                        'uz': 'Buyurtma identifikatori kiritilmagan',
+                        'ru': 'Не указан идентификатор заказа',
+                        'en': 'Order ID not specified'
+                    }
                 }
             }
 
-        # Order IDni topish
+        # 2. Order ni topish
         try:
             payment = Payment.objects.get(order_id=order_id)
         except Payment.DoesNotExist:
@@ -446,33 +465,64 @@ def check_perform_transaction(params):
             return {
                 'error': {
                     'code': -31050,
-                    'message': 'Order not found'
+                    'message': {
+                        'uz': 'Buyurtma topilmadi',
+                        'ru': 'Заказ не найден',
+                        'en': 'Order not found'
+                    }
                 }
             }
 
-        # To'lov holatini tekshirish
+        # 3. To'lov holatini tekshirish
         if payment.state != Payment.STATE_CREATED:
             logger.warning(f"Order already processed: {order_id}, state: {payment.state}")
             return {
                 'error': {
                     'code': -31008,
-                    'message': 'Order already processed'
+                    'message': {
+                        'uz': 'Buyurtma allaqachon qayta ishlangan',
+                        'ru': 'Заказ уже обработан',
+                        'en': 'Order already processed'
+                    }
                 }
             }
 
-        # Summani tekshirish
-        amount_tiyin = params.get('amount')
-        if amount_tiyin:
+        # 4. Summani tekshirish (agar yuborilgan bo'lsa)
+        if amount:
             expected_tiyin = sum_to_tiyin(payment.amount)
-            if amount_tiyin != expected_tiyin:
-                logger.warning(f"Amount mismatch: expected={expected_tiyin}, got={amount_tiyin}")
+            if amount != expected_tiyin:
+                logger.warning(f"Amount mismatch: expected={expected_tiyin}, got={amount}")
                 return {
                     'error': {
                         'code': -31001,
-                        'message': 'Amount mismatch'
+                        'message': {
+                            'uz': 'Noto\'g\'ri summa',
+                            'ru': 'Неверная сумма',
+                            'en': 'Invalid amount'
+                        }
                     }
                 }
 
+        # 5. Telegram ID tekshirish (ixtiyoriy)
+        telegram_id = account.get('telegram_id')
+        if telegram_id:
+            # Bo'sh joy bor mi? (Payme testda " 973358587" yuboradi)
+            telegram_id_str = str(telegram_id).strip()
+
+            if telegram_id_str != str(payment.user.telegram_id):
+                logger.warning(f"Telegram ID mismatch: expected={payment.user.telegram_id}, got={telegram_id}")
+                return {
+                    'error': {
+                        'code': -31050,
+                        'message': {
+                            'uz': 'Telegram ID mos kelmadi',
+                            'ru': 'Telegram ID не совпадает',
+                            'en': 'Telegram ID mismatch'
+                        }
+                    }
+                }
+
+        # ✅ Hammasi to'g'ri
         return {'allow': True}
 
     except Exception as e:
