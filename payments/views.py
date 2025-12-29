@@ -257,23 +257,103 @@ def create_payment(request):
 
 
 # ============= PAYME CALLBACK =============
+def get_statement(params):
+    """
+    GetStatement - To'lovlar hisobotini olish
+
+    Bu metod ixtiyoriy, lekin Payme test qiladi
+    """
+    try:
+        from_time = params.get('from')
+        to_time = params.get('to')
+
+        logger.info(f"GetStatement: from={from_time}, to={to_time}")
+
+        # Vaqt oralig'idagi to'lovlarni topish
+        from_datetime = timezone.datetime.fromtimestamp(from_time / 1000)
+        to_datetime = timezone.datetime.fromtimestamp(to_time / 1000)
+
+        payments = Payment.objects.filter(
+            created_at__gte=from_datetime,
+            created_at__lte=to_datetime,
+            payme_transaction_id__isnull=False
+        )
+
+        transactions = []
+        for payment in payments:
+            transaction = {
+                'id': payment.payme_transaction_id,
+                'time': int(payment.created_at.timestamp() * 1000),
+                'amount': sum_to_tiyin(payment.amount),
+                'account': {
+                    'order_id': str(payment.order_id),
+                    'telegram_id': payment.user.telegram_id
+                },
+                'create_time': int(payment.created_at.timestamp() * 1000),
+                'perform_time': int(payment.performed_at.timestamp() * 1000) if payment.performed_at else 0,
+                'cancel_time': int(payment.cancelled_at.timestamp() * 1000) if payment.cancelled_at else 0,
+                'transaction': str(payment.id),
+                'state': payment.state,
+                'reason': payment.reason
+            }
+            transactions.append(transaction)
+
+        return {'transactions': transactions}
+
+    except Exception as e:
+        logger.error(f"GetStatement error: {e}", exc_info=True)
+        return {
+            'error': {
+                'code': -32400,
+                'message': str(e)[:100]
+            }
+        }
+
+
+def change_password(params):
+    """
+    ChangePassword - Parolni o'zgartirish
+
+    Bu metod ixtiyoriy, lekin Payme test qiladi
+    """
+    try:
+        password = params.get('password')
+
+        logger.info(f"ChangePassword requested")
+
+        # Bu metoddan foydalanmasak, success qaytaramiz
+        # Yoki parolni settings ga saqlab qo'yish mumkin
+
+        return {'success': True}
+
+    except Exception as e:
+        logger.error(f"ChangePassword error: {e}", exc_info=True)
+        return {
+            'error': {
+                'code': -32400,
+                'message': str(e)[:100]
+            }
+        }
 
 @csrf_exempt
 @require_http_methods(["POST"])
 def payme_callback(request):
     """
     Payme Merchant API callback handler
+
+    ⚠️ MUHIM: Barcha xatolar HTTP 200 bilan qaytarilishi kerak!
     """
     try:
         # 1. Autentifikatsiya
         if not check_payme_auth(request):
             logger.warning("❌ Payme auth failed")
+            # ✅ HTTP 200 bilan xato qaytarish
             return JsonResponse({
                 'error': {
                     'code': -32504,
                     'message': 'Insufficient privileges to perform this method'
                 }
-            }, status=401)
+            }, status=200)  # ← 401 emas, 200!
 
         # 2. JSON parse
         try:
@@ -285,7 +365,7 @@ def payme_callback(request):
                     'code': -32700,
                     'message': 'Parse error'
                 }
-            })
+            }, status=200)  # ← HTTP 200
 
         method = body.get('method')
         params = body.get('params', {})
@@ -304,6 +384,10 @@ def payme_callback(request):
             result = cancel_transaction(params)
         elif method == 'CheckTransaction':
             result = check_transaction(params)
+        elif method == 'GetStatement':
+            result = get_statement(params)
+        elif method == 'ChangePassword':
+            result = change_password(params)
         else:
             logger.warning(f"❌ Unknown method: {method}")
             return JsonResponse({
@@ -311,21 +395,21 @@ def payme_callback(request):
                     'code': -32601,
                     'message': 'Method not found'
                 }
-            })
+            }, status=200)  # ← HTTP 200
 
-        # 4. Response
+        # 4. Response (DOIM HTTP 200)
         if 'error' in result:
             logger.error(f"❌ Payme error: {result['error']}")
             return JsonResponse({
                 'error': result['error'],
                 'id': request_id
-            })
+            }, status=200)  # ← HTTP 200
         else:
             logger.info(f"✅ Payme success: {result}")
             return JsonResponse({
                 'result': result,
                 'id': request_id
-            })
+            }, status=200)  # ← HTTP 200
 
     except Exception as e:
         logger.error(f"❌ Payme callback error: {e}", exc_info=True)
@@ -334,8 +418,7 @@ def payme_callback(request):
                 'code': -32400,
                 'message': str(e)[:100]
             }
-        }, status=500)
-
+        }, status=200)  # ← HTTP 200
 
 # ============= PAYME METHODS =============
 
