@@ -210,7 +210,7 @@ def create_payment(request):
         )
 
         logger.info(f"✅ Payment created: #{payment.id} (order_id: {payment.order_id}), "
-                   f"user: {telegram_id}, tariff: {tariff.name}")
+                    f"user: {telegram_id}, tariff: {tariff.name}")
 
         # 3. Payme havolasini yaratish (ORDER_ID bilan)
         payme_url = create_payme_link(
@@ -749,8 +749,6 @@ def check_last_payment_status(request, telegram_id):
             'error': str(e)
         }, status=500)
 
-
-# payments/views.py - check_payment_status funksiyasi
 
 @api_view(['GET'])
 def check_payment_status(request, telegram_id):
