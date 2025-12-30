@@ -182,66 +182,78 @@ def create_payment(request):
 def payme_callback(request):
     """
     Payme Merchant API callback handler
-    ⚠️ MUHIM: Barcha javoblar HTTP 200 bilan qaytariladi!
+    ⚠️ Payme talabiga ko‘ra HAR DOIM HTTP 200
     """
     try:
-        # 1. JSON parse (autentifikatsiyadan OLDIN)
+        # 1. JSON parse
         try:
             body = json.loads(request.body.decode('utf-8'))
-        except json.JSONDecodeError as e:
-            logger.error(f"❌ JSON decode error: {e}")
+        except json.JSONDecodeError:
             return JsonResponse({
-                'error': {'code': -32700, 'message': 'Parse error'}
+                'jsonrpc': '2.0',
+                'error': {'code': -32700, 'message': 'Parse error'},
+                'id': None
             }, status=200)
 
         method = body.get('method')
-        params = body.get('params', {})
+        params = body.get('params') or {}
         request_id = body.get('id')
 
-        logger.info(f"📥 Payme callback: method={method}, params={params}")
+        logger.info(f"📥 Payme callback: {method} | {params}")
 
-        # 2. Autentifikatsiya
+        # 2. Auth
         if not check_payme_auth(request):
-            logger.warning("❌ Payme auth failed")
             return JsonResponse({
-                'error': {'code': -32504, 'message': 'Insufficient privileges to perform this method'},
+                'jsonrpc': '2.0',
+                'error': {
+                    'code': -32504,
+                    'message': 'Insufficient privileges'
+                },
                 'id': request_id
-            }, status=200)  # ← HTTP 200!
+            }, status=200)
 
-        # 3. Method routing
+        # 3. Routing
         if method == 'CheckPerformTransaction':
-            result = check_perform_transaction(params)
+            response = check_perform_transaction(params)
         elif method == 'CreateTransaction':
-            result = create_transaction(params)
+            response = create_transaction(params)
         elif method == 'PerformTransaction':
-            result = perform_transaction(params)
+            response = perform_transaction(params)
         elif method == 'CancelTransaction':
-            result = cancel_transaction(params)
+            response = cancel_transaction(params)
         elif method == 'CheckTransaction':
-            result = check_transaction(params)
+            response = check_transaction(params)
         elif method == 'GetStatement':
-            result = get_statement(params)
+            response = get_statement(params)
         elif method == 'ChangePassword':
-            result = change_password(params)
+            response = change_password(params)
         else:
-            logger.warning(f"❌ Unknown method: {method}")
             return JsonResponse({
+                'jsonrpc': '2.0',
                 'error': {'code': -32601, 'message': 'Method not found'},
                 'id': request_id
             }, status=200)
 
-        # 4. Response (DOIM HTTP 200)
-        if 'error' in result:
-            logger.error(f"❌ Payme error: {result['error']}")
-            return JsonResponse({'error': result['error'], 'id': request_id}, status=200)
-        else:
-            logger.info(f"✅ Payme success: {result}")
-            return JsonResponse({'result': result, 'id': request_id}, status=200)
+        # 4. FINAL JSON-RPC RESPONSE
+        if 'error' in response:
+            return JsonResponse({
+                'jsonrpc': '2.0',
+                'error': response['error'],
+                'id': request_id
+            }, status=200)
+
+        return JsonResponse({
+            'jsonrpc': '2.0',
+            'result': response,
+            'id': request_id
+        }, status=200)
 
     except Exception as e:
-        logger.error(f"❌ Payme callback error: {e}", exc_info=True)
+        logger.error("❌ Payme callback fatal error", exc_info=True)
         return JsonResponse({
-            'error': {'code': -32400, 'message': str(e)[:100]}
+            'jsonrpc': '2.0',
+            'error': {'code': -32400, 'message': 'Internal error'},
+            'id': None
         }, status=200)
 
 
