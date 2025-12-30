@@ -1,4 +1,4 @@
-# payments/views.py - TO'LIQ TUZATILGAN VERSIYA
+# payments/views.py - TUZATILGAN VERSIYA (CreateTransaction fix)
 import json
 import logging
 from decimal import Decimal
@@ -55,6 +55,7 @@ def create_user(request):
             telegram_id=telegram_id,
             defaults={'full_name': full_name, 'username': username}
         )
+
         if not created:
             if full_name:
                 user.full_name = full_name
@@ -106,8 +107,10 @@ def use_pricing(request):
 
     try:
         user = BotUser.objects.get(telegram_id=telegram_id)
+
         if user.balance <= 0:
-            return Response({'success': False, 'error': 'Balans yetarli emas', 'balance': 0}, status=status.HTTP_400_BAD_REQUEST)
+            return Response({'success': False, 'error': 'Balans yetarli emas', 'balance': 0},
+                            status=status.HTTP_400_BAD_REQUEST)
 
         with db_transaction.atomic():
             user.balance -= 1
@@ -129,7 +132,8 @@ def create_payment(request):
     tariff_id = request.data.get('tariff_id')
 
     if not telegram_id or not tariff_id:
-        return Response({'success': False, 'error': 'telegram_id va tariff_id majburiy'}, status=status.HTTP_400_BAD_REQUEST)
+        return Response({'success': False, 'error': 'telegram_id va tariff_id majburiy'},
+                        status=status.HTTP_400_BAD_REQUEST)
 
     try:
         user = BotUser.objects.get(telegram_id=telegram_id)
@@ -143,7 +147,8 @@ def create_payment(request):
             state=Payment.STATE_CREATED
         )
 
-        logger.info(f"✅ Payment created: #{payment.id} (order_id: {payment.order_id}), user: {telegram_id}, tariff: {tariff.name}")
+        logger.info(
+            f"✅ Payment created: #{payment.id} (order_id: {payment.order_id}), user: {telegram_id}, tariff: {tariff.name}")
 
         payme_url = create_payme_link(
             telegram_id=telegram_id,
@@ -153,7 +158,8 @@ def create_payment(request):
 
         if not payme_url:
             logger.error(f"❌ Failed to create Payme URL for payment #{payment.id}")
-            return Response({'success': False, 'error': 'Payme havolasini yaratishda xatolik'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+            return Response({'success': False, 'error': 'Payme havolasini yaratishda xatolik'},
+                            status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
         logger.info(f"✅ Payme URL created: {payme_url}")
 
@@ -182,7 +188,7 @@ def create_payment(request):
 def payme_callback(request):
     """
     Payme Merchant API callback handler
-    ⚠️ Payme talabiga ko‘ra HAR DOIM HTTP 200
+    ⚠️ Payme talabiga ko'ra HAR DOIM HTTP 200
     """
     try:
         # 1. JSON parse
@@ -260,15 +266,17 @@ def payme_callback(request):
 # ============= PAYME METHODS =============
 
 def check_perform_transaction(params):
+    """CheckPerformTransaction - To'lovni tekshirish"""
     try:
         account = params.get('account') or {}
         order_id = account.get('order_id')
         amount = params.get('amount')
 
-        logger.info(f"CheckPerformTransaction: order_id={order_id}, amount={amount}")
+        logger.info(f"🔍 CheckPerformTransaction: order_id={order_id}, amount={amount}")
 
         # 1. order_id majburiy
         if not order_id:
+            logger.error("❌ Order ID not provided")
             return {
                 'error': {
                     'code': -31050,
@@ -283,7 +291,9 @@ def check_perform_transaction(params):
         # 2. Order topish
         try:
             payment = Payment.objects.get(order_id=order_id)
+            logger.info(f"✅ Payment found: #{payment.id}, amount={payment.amount} so'm")
         except Payment.DoesNotExist:
+            logger.error(f"❌ Payment not found: order_id={order_id}")
             return {
                 'error': {
                     'code': -31050,
@@ -295,22 +305,26 @@ def check_perform_transaction(params):
                 }
             }
 
-        # ❗ 3. AVVAL SUMMA (ENG MUHIM)
+        # 3. SUMMA TEKSHIRISH (ENG MUHIM!)
         expected_tiyin = sum_to_tiyin(payment.amount)
+        logger.info(f"💰 Amount check: received={amount} tiyin, expected={expected_tiyin} tiyin ({payment.amount} so'm)")
+
         if amount != expected_tiyin:
+            logger.error(f"❌ Amount mismatch: received={amount}, expected={expected_tiyin}")
             return {
                 'error': {
                     'code': -31001,
                     'message': {
-                        'uz': 'Noto‘g‘ri summa',
-                        'ru': 'Неверная сумма',
-                        'en': 'Invalid amount'
+                        'uz': f"Noto'g'ri summa. Kutilgan: {expected_tiyin} tiyin ({float(payment.amount)} so'm), Kelgan: {amount} tiyin",
+                        'ru': f"Неверная сумма. Ожидается: {expected_tiyin} тиын ({float(payment.amount)} сум), Получено: {amount} тиын",
+                        'en': f"Invalid amount. Expected: {expected_tiyin} tiyin ({float(payment.amount)} sum), Received: {amount} tiyin"
                     }
                 }
             }
 
-        # 4. Holat
+        # 4. Holat tekshirish
         if payment.state != Payment.STATE_CREATED:
+            logger.error(f"❌ Payment already processed: state={payment.state}")
             return {
                 'error': {
                     'code': -31008,
@@ -322,64 +336,78 @@ def check_perform_transaction(params):
                 }
             }
 
-        return {
-            'result': {
-                'allow': True
-            }
-        }
+        logger.info("✅ CheckPerformTransaction passed")
+        return {'allow': True}
 
     except Exception as e:
-        logger.error("CheckPerformTransaction error", exc_info=True)
+        logger.error(f"❌ CheckPerformTransaction error: {e}", exc_info=True)
         return {
             'error': {
                 'code': -31008,
-                'message': 'Internal error'
+                'message': f'Internal error: {str(e)[:100]}'
             }
         }
 
 
-
 def create_transaction(params):
-    """Tranzaksiyani yaratish - TUZATILGAN"""
+    """CreateTransaction - Tranzaksiyani yaratish"""
     try:
         payme_id = params.get('id')
         account = params.get('account', {})
         order_id = account.get('order_id')
         amount_tiyin = params.get('amount')
 
+        logger.info(f"🆕 CreateTransaction: payme_id={payme_id}, order_id={order_id}, amount={amount_tiyin}")
+
         # 1. Parametrlar tekshirish
         if not payme_id or not order_id:
+            logger.error("❌ Missing payme_id or order_id")
             return {'error': {'code': -31050, 'message': 'Transaction ID and Order ID required'}}
 
         # 2. Order ni topish
         try:
             payment = Payment.objects.get(order_id=order_id)
+            logger.info(f"✅ Payment found: #{payment.id}, amount={payment.amount} so'm, state={payment.state}")
         except Payment.DoesNotExist:
+            logger.error(f"❌ Payment not found: order_id={order_id}")
             return {'error': {'code': -31050, 'message': 'Order not found'}}
 
-        # ✅ 3. AVVAL SUMMA TEKSHIRISH (Transaction ID dan OLDIN!)
+        # 3. SUMMA TEKSHIRISH (Transaction ID dan OLDIN!)
         expected_tiyin = sum_to_tiyin(payment.amount)
+        logger.info(f"💰 Amount check: received={amount_tiyin} tiyin, expected={expected_tiyin} tiyin")
+
         if amount_tiyin != expected_tiyin:
-            return {'error': {'code': -31001, 'message': 'Amount mismatch'}}
+            logger.error(f"❌ Amount mismatch: received={amount_tiyin}, expected={expected_tiyin}")
+            return {
+                'error': {
+                    'code': -31001,
+                    'message': f"Amount mismatch. Expected: {expected_tiyin} tiyin ({float(payment.amount)} sum), Received: {amount_tiyin} tiyin"
+                }
+            }
 
         # 4. Order state tekshirish
         if payment.state != Payment.STATE_CREATED:
+            logger.error(f"❌ Order already processed: state={payment.state}")
             return {'error': {'code': -31008, 'message': 'Order already processed'}}
 
         # 5. TRANSACTION ID TEKSHIRISH (summa check dan KEYIN!)
         if payment.payme_transaction_id:
             if payment.payme_transaction_id == payme_id:
+                logger.info(f"✅ Transaction already exists: {payme_id}")
                 return {
                     'create_time': int(payment.created_at.timestamp() * 1000),
                     'transaction': str(payment.id),
                     'state': payment.state
                 }
             else:
+                logger.error(f"❌ Order has different transaction: {payment.payme_transaction_id}")
                 return {'error': {'code': -31050, 'message': 'Order already has transaction'}}
 
         # 6. Transaction ID saqlab qo'yish
         payment.payme_transaction_id = payme_id
         payment.save(update_fields=['payme_transaction_id'])
+
+        logger.info(f"✅ Transaction created: {payme_id}")
 
         return {
             'create_time': int(payment.created_at.timestamp() * 1000),
@@ -388,15 +416,15 @@ def create_transaction(params):
         }
 
     except Exception as e:
-        logger.error(f"CreateTransaction error: {e}", exc_info=True)
+        logger.error(f"❌ CreateTransaction error: {e}", exc_info=True)
         return {'error': {'code': -31008, 'message': str(e)[:100]}}
 
 
 def perform_transaction(params):
-    """To'lovni tasdiqlash"""
+    """PerformTransaction - To'lovni tasdiqlash"""
     try:
         payme_id = params.get('id')
-        logger.info(f"PerformTransaction: payme_id={payme_id}")
+        logger.info(f"✅ PerformTransaction: payme_id={payme_id}")
 
         if not payme_id:
             return {'error': {'code': -31003, 'message': 'Transaction ID required'}}
@@ -404,7 +432,7 @@ def perform_transaction(params):
         try:
             payment = Payment.objects.get(payme_transaction_id=payme_id)
         except Payment.DoesNotExist:
-            logger.warning(f"Transaction not found: {payme_id}")
+            logger.warning(f"❌ Transaction not found: {payme_id}")
             return {'error': {'code': -31003, 'message': 'Transaction not found'}}
 
         if payment.state == Payment.STATE_CREATED:
@@ -418,7 +446,8 @@ def perform_transaction(params):
                 user.balance += payment.pricing_count
                 user.save()
 
-                logger.info(f"✅ Payment completed: #{payment.id}, user: {user.telegram_id}, balance: {old_balance} -> {user.balance}")
+                logger.info(
+                    f"✅ Payment completed: #{payment.id}, user: {user.telegram_id}, balance: {old_balance} -> {user.balance}")
 
             return {
                 'transaction': str(payment.id),
@@ -431,20 +460,21 @@ def perform_transaction(params):
             return {'transaction': str(payment.id), 'perform_time': perform_time, 'state': payment.state}
 
         else:
-            logger.warning(f"Cannot perform transaction in state: {payment.state}")
+            logger.warning(f"❌ Cannot perform transaction in state: {payment.state}")
             return {'error': {'code': -31008, 'message': f'Cannot perform transaction in state: {payment.state}'}}
 
     except Exception as e:
-        logger.error(f"PerformTransaction error: {e}", exc_info=True)
+        logger.error(f"❌ PerformTransaction error: {e}", exc_info=True)
         return {'error': {'code': -31008, 'message': str(e)[:100]}}
 
 
 def cancel_transaction(params):
-    """To'lovni bekor qilish"""
+    """CancelTransaction - To'lovni bekor qilish"""
     try:
         payme_id = params.get('id')
         reason = params.get('reason')
-        logger.info(f"CancelTransaction: payme_id={payme_id}, reason={reason}")
+
+        logger.info(f"🚫 CancelTransaction: payme_id={payme_id}, reason={reason}")
 
         if not payme_id:
             return {'error': {'code': -31003, 'message': 'Transaction ID required'}}
@@ -452,25 +482,28 @@ def cancel_transaction(params):
         try:
             payment = Payment.objects.get(payme_transaction_id=payme_id)
         except Payment.DoesNotExist:
-            logger.warning(f"Transaction not found: {payme_id}")
+            logger.warning(f"❌ Transaction not found: {payme_id}")
             return {'error': {'code': -31003, 'message': 'Transaction not found'}}
 
         with db_transaction.atomic():
             if payment.state == Payment.STATE_CREATED:
                 payment.state = Payment.STATE_CANCELLED
+
             elif payment.state == Payment.STATE_COMPLETED:
                 payment.state = Payment.STATE_CANCELLED_AFTER_COMPLETE
+
                 if payment.user.balance >= payment.pricing_count:
                     old_balance = payment.user.balance
                     payment.user.balance -= payment.pricing_count
                     payment.user.save()
-                    logger.info(f"Balance refunded: user {payment.user.telegram_id}, balance: {old_balance} -> {payment.user.balance}")
+                    logger.info(
+                        f"💰 Balance refunded: user {payment.user.telegram_id}, balance: {old_balance} -> {payment.user.balance}")
 
             payment.cancelled_at = timezone.now()
             payment.reason = reason
             payment.save()
 
-            logger.info(f"Transaction cancelled: {payme_id}, state: {payment.state}")
+            logger.info(f"✅ Transaction cancelled: {payme_id}, state: {payment.state}")
 
         return {
             'transaction': str(payment.id),
@@ -479,15 +512,15 @@ def cancel_transaction(params):
         }
 
     except Exception as e:
-        logger.error(f"CancelTransaction error: {e}", exc_info=True)
+        logger.error(f"❌ CancelTransaction error: {e}", exc_info=True)
         return {'error': {'code': -31008, 'message': str(e)[:100]}}
 
 
 def check_transaction(params):
-    """Tranzaksiya holatini tekshirish"""
+    """CheckTransaction - Tranzaksiya holatini tekshirish"""
     try:
         payme_id = params.get('id')
-        logger.info(f"CheckTransaction: payme_id={payme_id}")
+        logger.info(f"🔍 CheckTransaction: payme_id={payme_id}")
 
         if not payme_id:
             return {'error': {'code': -31003, 'message': 'Transaction ID required'}}
@@ -495,7 +528,7 @@ def check_transaction(params):
         try:
             payment = Payment.objects.get(payme_transaction_id=payme_id)
         except Payment.DoesNotExist:
-            logger.warning(f"Transaction not found: {payme_id}")
+            logger.warning(f"❌ Transaction not found: {payme_id}")
             return {'error': {'code': -31003, 'message': 'Transaction not found'}}
 
         result = {
@@ -506,16 +539,18 @@ def check_transaction(params):
 
         if payment.performed_at:
             result['perform_time'] = int(payment.performed_at.timestamp() * 1000)
+
         if payment.cancelled_at:
             result['cancel_time'] = int(payment.cancelled_at.timestamp() * 1000)
+
         if payment.reason is not None:
             result['reason'] = payment.reason
 
-        logger.info(f"CheckTransaction result: {result}")
+        logger.info(f"✅ CheckTransaction result: {result}")
         return result
 
     except Exception as e:
-        logger.error(f"CheckTransaction error: {e}", exc_info=True)
+        logger.error(f"❌ CheckTransaction error: {e}", exc_info=True)
         return {'error': {'code': -31008, 'message': str(e)[:100]}}
 
 
@@ -524,7 +559,8 @@ def get_statement(params):
     try:
         from_time = params.get('from')
         to_time = params.get('to')
-        logger.info(f"GetStatement: from={from_time}, to={to_time}")
+
+        logger.info(f"📊 GetStatement: from={from_time}, to={to_time}")
 
         from_datetime = timezone.datetime.fromtimestamp(from_time / 1000)
         to_datetime = timezone.datetime.fromtimestamp(to_time / 1000)
@@ -553,17 +589,17 @@ def get_statement(params):
         return {'transactions': transactions}
 
     except Exception as e:
-        logger.error(f"GetStatement error: {e}", exc_info=True)
+        logger.error(f"❌ GetStatement error: {e}", exc_info=True)
         return {'error': {'code': -32400, 'message': str(e)[:100]}}
 
 
 def change_password(params):
     """ChangePassword - Parolni o'zgartirish"""
     try:
-        logger.info(f"ChangePassword requested")
+        logger.info("🔐 ChangePassword requested")
         return {'success': True}
     except Exception as e:
-        logger.error(f"ChangePassword error: {e}", exc_info=True)
+        logger.error(f"❌ ChangePassword error: {e}", exc_info=True)
         return {'error': {'code': -32400, 'message': str(e)[:100]}}
 
 
@@ -604,13 +640,15 @@ def check_payment_status(request, telegram_id):
         try:
             user = BotUser.objects.get(telegram_id=telegram_id)
         except BotUser.DoesNotExist:
-            return Response({'success': False, 'error': 'Foydalanuvchi topilmadi', 'has_payment': False}, status=status.HTTP_404_NOT_FOUND)
+            return Response({'success': False, 'error': 'Foydalanuvchi topilmadi', 'has_payment': False},
+                            status=status.HTTP_404_NOT_FOUND)
 
         time_threshold = timezone.now() - timezone.timedelta(minutes=30)
         payment = Payment.objects.filter(user=user, created_at__gte=time_threshold).order_by('-created_at').first()
 
         if not payment:
-            return Response({'success': True, 'has_payment': False, 'message': '30 daqiqa ichida to\'lov topilmadi', 'balance': user.balance})
+            return Response({'success': True, 'has_payment': False, 'message': '30 daqiqa ichida to\'lov topilmadi',
+                             'balance': user.balance})
 
         return Response({
             'success': True,
@@ -628,6 +666,8 @@ def check_payment_status(request, telegram_id):
             'tariff_name': payment.tariff.name if payment.tariff else None,
             'payme_transaction_id': payment.payme_transaction_id or None
         })
+
     except Exception as e:
         logger.error(f"Check payment status error: {e}", exc_info=True)
-        return Response({'success': False, 'error': str(e), 'has_payment': False}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        return Response({'success': False, 'error': str(e), 'has_payment': False},
+                        status=status.HTTP_500_INTERNAL_SERVER_ERROR)
