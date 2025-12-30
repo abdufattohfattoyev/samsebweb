@@ -1,4 +1,4 @@
-# payments/views.py - TUZATILGAN VERSIYA (CreateTransaction fix)
+# payments/views.py - TO'LIQ TUZATILGAN (Payme response format fixed)
 import json
 import logging
 from decimal import Decimal
@@ -394,6 +394,7 @@ def create_transaction(params):
         if payment.payme_transaction_id:
             if payment.payme_transaction_id == payme_id:
                 logger.info(f"✅ Transaction already exists: {payme_id}")
+                # ✅ IDEMPOTENT: Avvalgi response qaytarish
                 return {
                     'create_time': int(payment.created_at.timestamp() * 1000),
                     'transaction': str(payment.id),
@@ -407,13 +408,17 @@ def create_transaction(params):
         payment.payme_transaction_id = payme_id
         payment.save(update_fields=['payme_transaction_id'])
 
-        logger.info(f"✅ Transaction created: {payme_id}")
+        logger.info(f"✅ Transaction created successfully: payme_id={payme_id}, payment_id={payment.id}")
 
-        return {
+        # ✅ TO'G'RI FORMAT: Payme kutgan format
+        result = {
             'create_time': int(payment.created_at.timestamp() * 1000),
             'transaction': str(payment.id),
             'state': payment.state
         }
+
+        logger.info(f"📤 CreateTransaction response: {result}")
+        return result
 
     except Exception as e:
         logger.error(f"❌ CreateTransaction error: {e}", exc_info=True)
@@ -456,8 +461,13 @@ def perform_transaction(params):
             }
 
         elif payment.state == Payment.STATE_COMPLETED:
+            # Idempotent: Avvalgi response qaytarish
             perform_time = int(payment.performed_at.timestamp() * 1000) if payment.performed_at else 0
-            return {'transaction': str(payment.id), 'perform_time': perform_time, 'state': payment.state}
+            return {
+                'transaction': str(payment.id),
+                'perform_time': perform_time,
+                'state': payment.state
+            }
 
         else:
             logger.warning(f"❌ Cannot perform transaction in state: {payment.state}")
