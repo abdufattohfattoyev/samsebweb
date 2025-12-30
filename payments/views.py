@@ -321,49 +321,46 @@ def check_perform_transaction(params):
 
 
 def create_transaction(params):
-    """Tranzaksiyani yaratish"""
+    """Tranzaksiyani yaratish - TUZATILGAN"""
     try:
         payme_id = params.get('id')
         account = params.get('account', {})
         order_id = account.get('order_id')
         amount_tiyin = params.get('amount')
 
-        logger.info(f"CreateTransaction: payme_id={payme_id}, order_id={order_id}, amount={amount_tiyin}")
-
+        # 1. Parametrlar tekshirish
         if not payme_id or not order_id:
             return {'error': {'code': -31050, 'message': 'Transaction ID and Order ID required'}}
 
+        # 2. Order ni topish
         try:
             payment = Payment.objects.get(order_id=order_id)
         except Payment.DoesNotExist:
-            logger.warning(f"Order not found: {order_id}")
             return {'error': {'code': -31050, 'message': 'Order not found'}}
 
+        # ✅ 3. AVVAL SUMMA TEKSHIRISH (Transaction ID dan OLDIN!)
+        expected_tiyin = sum_to_tiyin(payment.amount)
+        if amount_tiyin != expected_tiyin:
+            return {'error': {'code': -31001, 'message': 'Amount mismatch'}}
+
+        # 4. Order state tekshirish
+        if payment.state != Payment.STATE_CREATED:
+            return {'error': {'code': -31008, 'message': 'Order already processed'}}
+
+        # 5. TRANSACTION ID TEKSHIRISH (summa check dan KEYIN!)
         if payment.payme_transaction_id:
             if payment.payme_transaction_id == payme_id:
-                logger.info(f"Transaction already exists: {payme_id}")
                 return {
                     'create_time': int(payment.created_at.timestamp() * 1000),
                     'transaction': str(payment.id),
                     'state': payment.state
                 }
             else:
-                logger.warning(f"Order already has transaction: {payment.payme_transaction_id}")
                 return {'error': {'code': -31050, 'message': 'Order already has transaction'}}
 
-        expected_tiyin = sum_to_tiyin(payment.amount)
-        if amount_tiyin != expected_tiyin:
-            logger.warning(f"Amount mismatch: expected={expected_tiyin}, got={amount_tiyin}")
-            return {'error': {'code': -31001, 'message': 'Amount mismatch'}}
-
-        if payment.state != Payment.STATE_CREATED:
-            logger.warning(f"Order already processed: {order_id}, state: {payment.state}")
-            return {'error': {'code': -31008, 'message': 'Order already processed'}}
-
+        # 6. Transaction ID saqlab qo'yish
         payment.payme_transaction_id = payme_id
         payment.save(update_fields=['payme_transaction_id'])
-
-        logger.info(f"✅ Transaction created: payment #{payment.id}, payme_id={payme_id}")
 
         return {
             'create_time': int(payment.created_at.timestamp() * 1000),
