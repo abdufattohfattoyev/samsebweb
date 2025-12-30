@@ -248,76 +248,83 @@ def payme_callback(request):
 # ============= PAYME METHODS =============
 
 def check_perform_transaction(params):
-    """Buyurtma mavjudligini tekshirish"""
     try:
-        account = params.get('account', {})
+        account = params.get('account') or {}
         order_id = account.get('order_id')
         amount = params.get('amount')
 
-        logger.info(f"CheckPerformTransaction: order_id={order_id}, amount={amount}, account={account}")
+        logger.info(f"CheckPerformTransaction: order_id={order_id}, amount={amount}")
 
-        # 1. order_id MAJBURIY
+        # 1. order_id majburiy
         if not order_id:
-            logger.warning(f"Order ID missing")
             return {
                 'error': {
                     'code': -31050,
-                    'message': {'uz': 'Buyurtma ID kiritilmagan', 'ru': 'Не указан ID заказа', 'en': 'Order ID not specified'}
+                    'message': {
+                        'uz': 'Buyurtma ID kiritilmagan',
+                        'ru': 'Не указан ID заказа',
+                        'en': 'Order ID not specified'
+                    }
                 }
             }
 
-        # 2. Order ni topish
+        # 2. Order topish
         try:
             payment = Payment.objects.get(order_id=order_id)
         except Payment.DoesNotExist:
-            logger.warning(f"Order not found: {order_id}")
             return {
                 'error': {
                     'code': -31050,
-                    'message': {'uz': 'Buyurtma topilmadi', 'ru': 'Заказ не найден', 'en': 'Order not found'}
+                    'message': {
+                        'uz': 'Buyurtma topilmadi',
+                        'ru': 'Заказ не найден',
+                        'en': 'Order not found'
+                    }
                 }
             }
 
-        # 3. Holat tekshirish
+        # ❗ 3. AVVAL SUMMA (ENG MUHIM)
+        expected_tiyin = sum_to_tiyin(payment.amount)
+        if amount != expected_tiyin:
+            return {
+                'error': {
+                    'code': -31001,
+                    'message': {
+                        'uz': 'Noto‘g‘ri summa',
+                        'ru': 'Неверная сумма',
+                        'en': 'Invalid amount'
+                    }
+                }
+            }
+
+        # 4. Holat
         if payment.state != Payment.STATE_CREATED:
-            logger.warning(f"Order already processed: {order_id}, state: {payment.state}")
             return {
                 'error': {
                     'code': -31008,
-                    'message': {'uz': 'Buyurtma allaqachon qayta ishlangan', 'ru': 'Заказ уже обработан', 'en': 'Order already processed'}
+                    'message': {
+                        'uz': 'Buyurtma allaqachon qayta ishlangan',
+                        'ru': 'Заказ уже обработан',
+                        'en': 'Order already processed'
+                    }
                 }
             }
 
-        # 4. Summa tekshirish
-        if amount:
-            expected_tiyin = sum_to_tiyin(payment.amount)
-            if amount != expected_tiyin:
-                logger.warning(f"Amount mismatch: expected={expected_tiyin}, got={amount}")
-                return {
-                    'error': {
-                        'code': -31001,
-                        'message': {'uz': 'Noto\'g\'ri summa', 'ru': 'Неверная сумма', 'en': 'Invalid amount'}
-                    }
-                }
-
-        # 5. Telegram ID (ixtiyoriy)
-        telegram_id = account.get('telegram_id')
-        if telegram_id:
-            telegram_id_str = str(telegram_id).strip()
-            if telegram_id_str != str(payment.user.telegram_id):
-                logger.warning(f"Telegram ID mismatch: expected={payment.user.telegram_id}, got={telegram_id}")
-                return {
-                    'error': {
-                        'code': -31050,
-                        'message': {'uz': 'Telegram ID mos kelmadi', 'ru': 'Telegram ID не совпадает', 'en': 'Telegram ID mismatch'}
-                    }
-                }
-
-        return {'allow': True}
+        return {
+            'result': {
+                'allow': True
+            }
+        }
 
     except Exception as e:
-        logger.error(f"CheckPerformTransaction error: {e}", exc_info=True)
-        return {'error': {'code': -31008, 'message': str(e)[:100]}}
+        logger.error("CheckPerformTransaction error", exc_info=True)
+        return {
+            'error': {
+                'code': -31008,
+                'message': 'Internal error'
+            }
+        }
+
 
 
 def create_transaction(params):
