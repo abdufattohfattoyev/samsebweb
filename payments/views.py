@@ -448,12 +448,10 @@ def perform_transaction(params):
 
 
 def cancel_transaction(params):
-    """CancelTransaction - To'lovni bekor qilish"""
+    """CancelTransaction - Tranzaksiyani bekor qilish"""
     try:
         payme_id = params.get('id')
         reason = params.get('reason')
-
-        logger.info(f"🚫 CancelTransaction: payme_id={payme_id}, reason={reason}")
 
         if not payme_id:
             return {'error': {'code': -31003, 'message': 'Transaction ID required'}}
@@ -461,28 +459,32 @@ def cancel_transaction(params):
         try:
             payment = Payment.objects.get(payme_transaction_id=payme_id)
         except Payment.DoesNotExist:
-            logger.warning(f"❌ Transaction not found: {payme_id}")
             return {'error': {'code': -31003, 'message': 'Transaction not found'}}
 
-        with db_transaction.atomic():
-            if payment.state == Payment.STATE_CREATED:
-                payment.state = Payment.STATE_CANCELLED
+        # ✅ Idempotent tekshiruv
+        if payment.state in [Payment.STATE_CANCELLED, Payment.STATE_CANCELLED_AFTER_COMPLETE]:
+            return {
+                'transaction': str(payment.id),
+                'cancel_time': int(payment.cancelled_at.timestamp() * 1000),
+                'state': payment.state
+            }
 
-            elif payment.state == Payment.STATE_COMPLETED:
-                payment.state = Payment.STATE_CANCELLED_AFTER_COMPLETE
+        # Holatni o‘zgartirish
+        if payment.state == Payment.STATE_CREATED:
+            payment.state = Payment.STATE_CANCELLED
+        elif payment.state == Payment.STATE_COMPLETED:
+            payment.state = Payment.STATE_CANCELLED_AFTER_COMPLETE
+            # balansni kamaytirish
+            if payment.user.balance >= payment.pricing_count:
+                payment.user.balance -= payment.pricing_count
+                payment.user.save(update_fields=['balance'])
 
-                if payment.user.balance >= payment.pricing_count:
-                    old_balance = payment.user.balance
-                    payment.user.balance -= payment.pricing_count
-                    payment.user.save()
-                    logger.info(
-                        f"💰 Balance refunded: user {payment.user.telegram_id}, balance: {old_balance} -> {payment.user.balance}")
-
-            payment.cancelled_at = timezone.now()
+        # cancel_time va reason saqlash
+        payment.cancelled_at = timezone.now()
+        if reason is not None:
             payment.reason = reason
-            payment.save()
 
-            logger.info(f"✅ Transaction cancelled: {payme_id}, state: {payment.state}")
+        payment.save(update_fields=['state', 'cancelled_at', 'reason'])
 
         return {
             'transaction': str(payment.id),
@@ -491,8 +493,8 @@ def cancel_transaction(params):
         }
 
     except Exception as e:
-        logger.error(f"❌ CancelTransaction error: {e}", exc_info=True)
         return {'error': {'code': -31008, 'message': str(e)[:100]}}
+
 
 
 def check_transaction(params):
