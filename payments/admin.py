@@ -1,4 +1,13 @@
-# payments/admin.py
+"""
+ORDER_ID MUAMMOSI - YECHIM
+===========================
+Admin panelda order_id ko'rinmaydi degani
+"""
+
+# ========== 1-QADAM: admin.py ni to'g'rilash ==========
+
+# payments/admin.py - TO'LTIRILGAN
+
 from django.contrib import admin
 from django.utils.html import format_html
 from .models import PricingTariff, BotUser, Payment, PricingHistory
@@ -49,8 +58,13 @@ class BotUserAdmin(admin.ModelAdmin):
 
 @admin.register(Payment)
 class PaymentAdmin(admin.ModelAdmin):
+    # ✅ MUAMMONING YECHIMI:
+    # 1. order_id ni list_display ga qo'shish
+    # 2. order_id ni readonly_fields ga qo'shish
+
     list_display = [
         'id',
+        'order_id',  # ✅ QO'SHILDI!
         'user_link',
         'tariff',
         'formatted_amount',
@@ -59,20 +73,32 @@ class PaymentAdmin(admin.ModelAdmin):
         'payme_transaction_id',
         'created_at'
     ]
+
     list_filter = ['state', 'created_at']
-    search_fields = ['id', 'payme_transaction_id', 'user__telegram_id', 'user__full_name']
+
+    search_fields = [
+        'id',
+        'order_id',  # ✅ QO'SHILDI! - order_id bo'yicha qidirish
+        'payme_transaction_id',
+        'user__telegram_id',
+        'user__full_name'
+    ]
+
+    # ✅ MUHIM: order_id readonly qilish
     readonly_fields = [
         'id',
+        'order_id',  # ✅ QO'SHILDI! - auto generate qiladi
         'payme_transaction_id',
         'created_at',
         'performed_at',
         'cancelled_at'
     ]
+
     ordering = ['-created_at']
 
     fieldsets = (
         ('Buyurtma ma\'lumotlari', {
-            'fields': ('id', 'user', 'tariff')
+            'fields': ('id', 'order_id', 'user', 'tariff')  # ✅ order_id qo'shildi
         }),
         ('To\'lov ma\'lumotlari', {
             'fields': ('amount', 'pricing_count')
@@ -135,7 +161,7 @@ class PricingHistoryAdmin(admin.ModelAdmin):
     user_link.short_description = 'Foydalanuvchi'
 
     def formatted_price(self, obj):
-        return f"${obj.price:,.2f}"
+        return f"{obj.price:,.2f} so'm"
 
     formatted_price.short_description = 'Narxi'
 
