@@ -357,71 +357,40 @@ def create_transaction(params):
         order_id = account.get('order_id')
         amount_tiyin = params.get('amount')
 
-        logger.info(f"🆕 CreateTransaction: payme_id={payme_id}, order_id={order_id}, amount={amount_tiyin}")
-
-        # 1. Parametrlar tekshirish
         if not payme_id or not order_id:
-            logger.error("❌ Missing payme_id or order_id")
             return {'error': {'code': -31050, 'message': 'Transaction ID and Order ID required'}}
 
-        # 2. Order ni topish
+        # 1. Order ni topish
         try:
             payment = Payment.objects.get(order_id=order_id)
-            logger.info(f"✅ Payment found: #{payment.id}, amount={payment.amount} so'm, state={payment.state}")
         except Payment.DoesNotExist:
-            logger.error(f"❌ Payment not found: order_id={order_id}")
             return {'error': {'code': -31050, 'message': 'Order not found'}}
 
-        # 3. SUMMA TEKSHIRISH (Transaction ID dan OLDIN!)
+        # 2. SUMMA TEKSHIRISH
         expected_tiyin = sum_to_tiyin(payment.amount)
-        logger.info(f"💰 Amount check: received={amount_tiyin} tiyin, expected={expected_tiyin} tiyin")
-
         if amount_tiyin != expected_tiyin:
-            logger.error(f"❌ Amount mismatch: received={amount_tiyin}, expected={expected_tiyin}")
-            return {
-                'error': {
-                    'code': -31001,
-                    'message': f"Amount mismatch. Expected: {expected_tiyin} tiyin ({float(payment.amount)} sum), Received: {amount_tiyin} tiyin"
-                }
-            }
+            return {'error': {'code': -31001, 'message': 'Amount mismatch'}}
 
-        # 4. Order state tekshirish
+        # 3. Order state tekshirish
         if payment.state != Payment.STATE_CREATED:
-            logger.error(f"❌ Order already processed: state={payment.state}")
             return {'error': {'code': -31008, 'message': 'Order already processed'}}
 
-        # 5. TRANSACTION ID TEKSHIRISH (summa check dan KEYIN!)
+        # 4. TRANSACTION ID TEKSHIRISH (idempotent)
         if payment.payme_transaction_id:
             if payment.payme_transaction_id == payme_id:
-                logger.info(f"✅ Transaction already exists: {payme_id}")
-                # ✅ IDEMPOTENT: Avvalgi response qaytarish
-                return {
-                    'create_time': int(payment.created_at.timestamp() * 1000),
-                    'transaction': str(payment.id),
-                    'state': payment.state
-                }
+                # Avvalgi response qaytarish
+                return check_transaction({'id': payme_id})
             else:
-                logger.error(f"❌ Order has different transaction: {payment.payme_transaction_id}")
                 return {'error': {'code': -31050, 'message': 'Order already has transaction'}}
 
-        # 6. Transaction ID saqlab qo'yish
+        # 5. Transaction ID saqlash
         payment.payme_transaction_id = payme_id
         payment.save(update_fields=['payme_transaction_id'])
 
-        logger.info(f"✅ Transaction created successfully: payme_id={payme_id}, payment_id={payment.id}")
-
-        # ✅ TO'G'RI FORMAT: Payme kutgan format
-        result = {
-            'create_time': int(payment.created_at.timestamp() * 1000),
-            'transaction': str(payment.id),
-            'state': payment.state
-        }
-
-        logger.info(f"📤 CreateTransaction response: {result}")
-        return result
+        # 6. Response (Payme specs bo‘yicha)
+        return check_transaction({'id': payme_id})
 
     except Exception as e:
-        logger.error(f"❌ CreateTransaction error: {e}", exc_info=True)
         return {'error': {'code': -31008, 'message': str(e)[:100]}}
 
 
@@ -530,37 +499,26 @@ def check_transaction(params):
     """CheckTransaction - Tranzaksiya holatini tekshirish"""
     try:
         payme_id = params.get('id')
-        logger.info(f"🔍 CheckTransaction: payme_id={payme_id}")
-
         if not payme_id:
             return {'error': {'code': -31003, 'message': 'Transaction ID required'}}
 
         try:
             payment = Payment.objects.get(payme_transaction_id=payme_id)
         except Payment.DoesNotExist:
-            logger.warning(f"❌ Transaction not found: {payme_id}")
             return {'error': {'code': -31003, 'message': 'Transaction not found'}}
 
         result = {
             'create_time': int(payment.created_at.timestamp() * 1000),
+            'perform_time': int(payment.performed_at.timestamp() * 1000) if payment.performed_at else 0,
+            'cancel_time': int(payment.cancelled_at.timestamp() * 1000) if payment.cancelled_at else 0,
             'transaction': str(payment.id),
-            'state': payment.state
+            'state': payment.state,
+            'reason': payment.reason if payment.reason is not None else None
         }
 
-        if payment.performed_at:
-            result['perform_time'] = int(payment.performed_at.timestamp() * 1000)
-
-        if payment.cancelled_at:
-            result['cancel_time'] = int(payment.cancelled_at.timestamp() * 1000)
-
-        if payment.reason is not None:
-            result['reason'] = payment.reason
-
-        logger.info(f"✅ CheckTransaction result: {result}")
         return result
 
     except Exception as e:
-        logger.error(f"❌ CheckTransaction error: {e}", exc_info=True)
         return {'error': {'code': -31008, 'message': str(e)[:100]}}
 
 
