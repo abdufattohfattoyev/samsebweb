@@ -350,48 +350,59 @@ def check_perform_transaction(params):
 
 
 def create_transaction(params):
-    """CreateTransaction - Tranzaksiyani yaratish"""
+    account = params.get("account", {})
+    order_id = account.get("order_id")
+    amount = params.get("amount")
+    transaction_id = params.get("id")
+    create_time = params.get("time")  # 🔴 MUHIM
+
+    if not order_id or not amount or not transaction_id or not create_time:
+        return {
+            "error": {
+                "code": -31050,
+                "message": "Invalid parameters"
+            }
+        }
+
     try:
-        payme_id = params.get('id')
-        account = params.get('account', {})
-        order_id = account.get('order_id')
-        amount_tiyin = params.get('amount')
+        payment = Payment.objects.get(order_id=order_id)
+    except Payment.DoesNotExist:
+        return {
+            "error": {
+                "code": -31050,
+                "message": "Order not found"
+            }
+        }
 
-        if not payme_id or not order_id:
-            return {'error': {'code': -31050, 'message': 'Transaction ID and Order ID required'}}
+    # 🔐 Agar shu order uchun allaqachon transaction bo‘lsa
+    if payment.payme_transaction_id:
+        if payment.payme_transaction_id != transaction_id:
+            return {
+                "error": {
+                    "code": -31050,
+                    "message": "Order already has transaction"
+                }
+            }
 
-        # 1. Order ni topish
-        try:
-            payment = Payment.objects.get(order_id=order_id)
-        except Payment.DoesNotExist:
-            return {'error': {'code': -31050, 'message': 'Order not found'}}
+    # 🔥 ENG MUHIM JOY
+    payment.payme_transaction_id = transaction_id
+    payment.payme_create_time = create_time
+    payment.save(update_fields=[
+        "payme_transaction_id",
+        "payme_create_time"
+    ])
 
-        # 2. SUMMA TEKSHIRISH
-        expected_tiyin = sum_to_tiyin(payment.amount)
-        if amount_tiyin != expected_tiyin:
-            return {'error': {'code': -31001, 'message': 'Amount mismatch'}}
+    return {
+        "result": {
+            "create_time": payment.payme_create_time,  # ❗ NULL EMAS
+            "perform_time": 0,
+            "cancel_time": 0,
+            "transaction": payment.payme_transaction_id,
+            "state": payment.state,
+            "reason": None
+        }
+    }
 
-        # 3. Order state tekshirish
-        if payment.state != Payment.STATE_CREATED:
-            return {'error': {'code': -31008, 'message': 'Order already processed'}}
-
-        # 4. TRANSACTION ID TEKSHIRISH (idempotent)
-        if payment.payme_transaction_id:
-            if payment.payme_transaction_id == payme_id:
-                # Avvalgi response qaytarish
-                return check_transaction({'id': payme_id})
-            else:
-                return {'error': {'code': -31050, 'message': 'Order already has transaction'}}
-
-        # 5. Transaction ID saqlash
-        payment.payme_transaction_id = payme_id
-        payment.save(update_fields=['payme_transaction_id'])
-
-        # 6. Response (Payme specs bo‘yicha)
-        return check_transaction({'id': payme_id})
-
-    except Exception as e:
-        return {'error': {'code': -31008, 'message': str(e)[:100]}}
 
 
 def perform_transaction(params):
