@@ -350,33 +350,43 @@ def check_perform_transaction(params):
 
 
 def create_transaction(params):
-    account = params.get("account", {})
-    order_id = account.get("order_id")
-    amount = params.get("amount")
-    transaction_id = params.get("id")
-    create_time = params.get("time")  # 🔴 MUHIM
-
-    if not order_id or not amount or not transaction_id or not create_time:
-        return {
-            "error": {
-                "code": -31050,
-                "message": "Invalid parameters"
-            }
-        }
-
     try:
-        payment = Payment.objects.get(order_id=order_id)
-    except Payment.DoesNotExist:
-        return {
-            "error": {
-                "code": -31050,
-                "message": "Order not found"
-            }
-        }
+        account = params.get("account", {})
+        order_id = account.get("order_id")
+        amount = params.get("amount")
+        payme_id = params.get("id")
+        payme_time = params.get("time")
 
-    # 🔐 Agar shu order uchun allaqachon transaction bo‘lsa
-    if payment.payme_transaction_id:
-        if payment.payme_transaction_id != transaction_id:
+        if not all([order_id, amount, payme_id, payme_time]):
+            return {
+                "error": {
+                    "code": -31050,
+                    "message": "Invalid parameters"
+                }
+            }
+
+        # 1️⃣ Shu payme_id bilan transaction bormi?
+        payment = Payment.objects.filter(
+            payme_transaction_id=payme_id
+        ).first()
+
+        if payment:
+            return {
+                "create_time": payment.payme_create_time,
+                "perform_time": 0,
+                "cancel_time": 0,
+                "transaction": payment.payme_transaction_id,
+                "state": payment.state,
+                "reason": payment.reason
+            }
+
+        # 2️⃣ Shu order uchun ACTIVE transaction bormi?
+        existing = Payment.objects.filter(
+            order_id=order_id,
+            state=1  # CREATED
+        ).first()
+
+        if existing:
             return {
                 "error": {
                     "code": -31050,
@@ -384,24 +394,31 @@ def create_transaction(params):
                 }
             }
 
-    # 🔥 ENG MUHIM JOY
-    payment.payme_transaction_id = transaction_id
-    payment.payme_create_time = create_time
-    payment.save(update_fields=[
-        "payme_transaction_id",
-        "payme_create_time"
-    ])
+        # 3️⃣ YANGI transaction yaratamiz
+        payment = Payment.objects.create(
+            order_id=order_id,
+            amount=amount,
+            payme_transaction_id=payme_id,
+            payme_create_time=payme_time,
+            state=1
+        )
 
-    return {
-        "result": {
-            "create_time": payment.payme_create_time,  # ❗ NULL EMAS
+        return {
+            "create_time": payment.payme_create_time,
             "perform_time": 0,
             "cancel_time": 0,
             "transaction": payment.payme_transaction_id,
             "state": payment.state,
             "reason": None
         }
-    }
+
+    except Exception as e:
+        return {
+            "error": {
+                "code": -31008,
+                "message": str(e)[:100]
+            }
+        }
 
 
 
@@ -508,7 +525,6 @@ def cancel_transaction(params):
 
 
 def check_transaction(params):
-    """CheckTransaction - Tranzaksiya holatini tekshirish (Payme mos)"""
     try:
         payme_id = params.get("id")
         if not payme_id:
@@ -519,11 +535,11 @@ def check_transaction(params):
                 }
             }
 
-        try:
-            payment = Payment.objects.get(
-                payme_transaction_id=payme_id
-            )
-        except Payment.DoesNotExist:
+        payment = Payment.objects.filter(
+            payme_transaction_id=payme_id
+        ).first()
+
+        if not payment:
             return {
                 "error": {
                     "code": -31003,
@@ -532,19 +548,12 @@ def check_transaction(params):
             }
 
         return {
-            # 🔴 PAYME YUBORGAN TIME
             "create_time": payment.payme_create_time,
-
-            # ⏱ Agar bo‘lsa, ms ga o‘tkaziladi
             "perform_time": int(payment.performed_at.timestamp() * 1000)
                 if payment.performed_at else 0,
-
             "cancel_time": int(payment.cancelled_at.timestamp() * 1000)
                 if payment.cancelled_at else 0,
-
-            # 🔴 PAYME TRANSACTION ID
             "transaction": payment.payme_transaction_id,
-
             "state": payment.state,
             "reason": payment.reason
         }
@@ -556,6 +565,7 @@ def check_transaction(params):
                 "message": str(e)[:100]
             }
         }
+
 
 
 def get_statement(params):
