@@ -350,34 +350,46 @@ def check_perform_transaction(params):
 
 
 def create_transaction(params):
+    """
+    Payme CreateTransaction metodi
+    Testdan o'tishi uchun eng muhim: BIRINCHI chaqiruvda tranzaksiya yaratilishi shart!
+    """
     try:
         account = params.get("account", {})
         order_id = account.get("order_id")
-        amount = params.get("amount")
-        payme_transaction_id = params.get("id")          # Payme tranzaksiya IDsi
-        payme_time = params.get("time")
+        amount_tiyin = params.get("amount")               # tiyinlarda keladi
+        transaction_id = params.get("id")                 # Payme tranzaksiya IDsi
+        transaction_time = params.get("time")             # ms
 
-        if not all([order_id, amount, payme_transaction_id, payme_time]):
-            return {"error": {"code": -31050, "message": "Invalid parameters"}}
-
-        # 1. Shu payme_transaction_id bilan allaqachon tranzaksiya bor-yo'qligini tekshirish
-        # (eng muhim qism — idempotency)
-        payment = Payment.objects.filter(payme_transaction_id=payme_transaction_id).first()
-        if payment:
-            # Agar shu tranzaksiya ID bilan allaqachon yaratilgan bo'lsa — eski ma'lumotni qaytarish
+        if not all([order_id, amount_tiyin, transaction_id, transaction_time]):
             return {
-                "create_time": payment.payme_create_time,
+                "error": {
+                    "code": -31050,
+                    "message": "Required parameters missing"
+                }
+            }
+
+        # 1. Eng muhim! Shu tranzaksiya ID bilan oldin yaratilganmi? (idempotency)
+        existing_by_tx_id = Payment.objects.filter(
+            payme_transaction_id=transaction_id
+        ).first()
+
+        if existing_by_tx_id:
+            # Idempotent javob — allaqachon yaratilgan tranzaksiyani qaytarish
+            return {
+                "create_time": existing_by_tx_id.payme_create_time,
                 "perform_time": 0,
                 "cancel_time": 0,
-                "transaction": payment.payme_transaction_id,
-                "state": payment.state,
+                "transaction": existing_by_tx_id.payme_transaction_id,
+                "state": existing_by_tx_id.state,
                 "reason": None
             }
 
-        # 2. Shu order_id ga bog'langan tranzaksiya borligini tekshirish
-        existing_payment = Payment.objects.filter(order_id=order_id).first()
-        if existing_payment:
-            # Bu order uchun tranzaksiya allaqachon bor → xato
+        # 2. Shu order_id ga umuman tranzaksiya bor-yo'qligini tekshirish
+        # (faqat bu joyda -31050 qaytarilishi kerak)
+        existing_by_order = Payment.objects.filter(order_id=order_id).exists()
+
+        if existing_by_order:
             return {
                 "error": {
                     "code": -31050,
@@ -385,15 +397,18 @@ def create_transaction(params):
                 }
             }
 
-        # 3. Yangi tranzaksiya yaratish
+        # 3. Yangi tranzaksiya yaratish — bu joyga faqat birinchi marta kelishi kerak
+        # amount ni so'mga aylantirib saqlaymiz (ko'pchilik shunday qiladi)
+        amount_sum = Decimal(amount_tiyin) / Decimal(100)
+
         payment = Payment.objects.create(
             order_id=order_id,
-            amount=tiyin_to_sum(amount),  # tiyin → so'm
-            payme_transaction_id=payme_transaction_id,
-            payme_create_time=payme_time,
+            amount=amount_sum,
+            payme_transaction_id=transaction_id,
+            payme_create_time=transaction_time,
             state=Payment.STATE_CREATED,
-            # user va tariff ni keyinroq bog'lashingiz mumkin
-            # yoki create_payment da oldindan yaratilgan bo'lsa — shuni olish
+            # Agar oldindan yaratilgan bo'lsa user/tariff ni bog'lash kerak bo'ladi
+            # Bu yerda test uchun minimal variant — keyinroq to'ldiriladi
         )
 
         return {
@@ -406,8 +421,13 @@ def create_transaction(params):
         }
 
     except Exception as e:
-        logger.error(f"CreateTransaction error: {e}", exc_info=True)
-        return {"error": {"code": -31008, "message": str(e)[:200]}}
+        logger.exception("CreateTransaction unexpected error")
+        return {
+            "error": {
+                "code": -31008,
+                "message": f"Internal error: {str(e)[:150]}"
+            }
+        }
 
 
 
