@@ -1,7 +1,8 @@
-# payments/admin.py - TO'LIQ TUZATILGAN
+# payments/admin.py - TO'LIQ TUZATILGAN VA XATOLAR TUZATILGAN
 
 from django.contrib import admin
 from django.utils.html import format_html
+from django.urls import reverse
 from .models import PricingTariff, BotUser, Payment, PricingHistory
 
 
@@ -14,10 +15,12 @@ class PricingTariffAdmin(admin.ModelAdmin):
 
     def formatted_price(self, obj):
         return f"{obj.price:,.0f} so'm"
+
     formatted_price.short_description = 'Narxi'
 
     def formatted_price_per_one(self, obj):
         return f"{obj.price_per_one:,.2f} so'm"
+
     formatted_price_per_one.short_description = 'Bitta narxlash narxi'
 
 
@@ -49,22 +52,20 @@ class BotUserAdmin(admin.ModelAdmin):
 @admin.register(Payment)
 class PaymentAdmin(admin.ModelAdmin):
     """
-    ✅ ORDER_ID muammosi yechildi:
-    - list_display ga qo'shildi
-    - search_fields ga qo'shildi
-    - readonly_fields ga qo'shildi
-    - fieldsets ga qo'shildi
+    ✅ Xatolar tuzatildi:
+    1. user_link metodida NoneType xatosi tuzatildi
+    2. Order ID ko'rsatishda xatolar tuzatildi
     """
-    
+
     list_display = [
         'id',
-        'order_id_display',  # ✅ Maxsus formatda ko'rsatish
-        'user_link',
-        'tariff',
+        'order_id_display',
+        'user_link_safe',  # ✅ Safe versiyasi
+        'tariff_info',
         'formatted_amount',
-        'pricing_count',
+        'pricing_count_display',
         'state_badge',
-        'payme_transaction_short',  # ✅ Qisqartirilgan transaction ID
+        'payme_transaction_short',
         'created_at'
     ]
 
@@ -72,22 +73,21 @@ class PaymentAdmin(admin.ModelAdmin):
 
     search_fields = [
         'id',
-        'order_id',  # ✅ QO'SHILDI! - order_id bo'yicha qidirish
+        'order_id',
         'payme_transaction_id',
         'user__telegram_id',
         'user__full_name',
         'user__username'
     ]
 
-    # ✅ MUHIM: order_id readonly qilish (avtomatik generate qiladi)
     readonly_fields = [
         'id',
-        'order_id',  # ✅ QO'SHILDI!
+        'order_id',
         'payme_transaction_id',
         'created_at',
         'performed_at',
         'cancelled_at',
-        'order_id_copy_button'  # ✅ Nusxalash tugmasi
+        'order_id_copy_button'
     ]
 
     ordering = ['-created_at']
@@ -96,8 +96,8 @@ class PaymentAdmin(admin.ModelAdmin):
         ('📋 Buyurtma ma\'lumotlari', {
             'fields': (
                 'id',
-                'order_id',  # ✅ QO'SHILDI!
-                'order_id_copy_button',  # ✅ Nusxalash uchun
+                'order_id',
+                'order_id_copy_button',
                 'user',
                 'tariff'
             )
@@ -116,7 +116,11 @@ class PaymentAdmin(admin.ModelAdmin):
     def order_id_display(self, obj):
         """Order ID ni qisqartirib ko'rsatish"""
         if obj.order_id:
-            short_id = str(obj.order_id)[:8] + '...' + str(obj.order_id)[-8:]
+            order_str = str(obj.order_id)
+            if len(order_str) > 16:
+                short_id = order_str[:8] + '...' + order_str[-8:]
+            else:
+                short_id = order_str
             return format_html(
                 '<span style="font-family: monospace; background: #f0f0f0; '
                 'padding: 2px 6px; border-radius: 3px;" title="{}">{}</span>',
@@ -124,11 +128,12 @@ class PaymentAdmin(admin.ModelAdmin):
                 short_id
             )
         return '-'
+
     order_id_display.short_description = 'Order ID'
 
     def order_id_copy_button(self, obj):
         """Order ID ni nusxalash uchun tugma"""
-        if obj.order_id:
+        if obj and obj.order_id:
             return format_html(
                 '<div style="margin: 10px 0;">'
                 '<input type="text" value="{}" id="order_id_field" '
@@ -154,37 +159,77 @@ class PaymentAdmin(admin.ModelAdmin):
                 obj.order_id
             )
         return '-'
+
     order_id_copy_button.short_description = 'Order ID (test uchun)'
 
+    def user_link_safe(self, obj):
+        """✅ Foydalanuvchi linkini ko'rsatish (safe versiya)"""
+        if obj and obj.user:
+            return format_html(
+                '<a href="/admin/payments/botuser/{}/change/" title="Telegram ID: {}">{}</a>',
+                obj.user.id,
+                obj.user.telegram_id,
+                obj.user.full_name
+            )
+        return format_html('<span style="color: #999;">Foydalanuvchi yo\'q</span>')
+
+    user_link_safe.short_description = 'Foydalanuvchi'
+
     def user_link(self, obj):
-        """Foydalanuvchi linkini ko'rsatish"""
-        return format_html(
-            '<a href="/admin/payments/botuser/{}/change/">{}</a>',
-            obj.user.id,
-            obj.user.full_name
-        )
-    user_link.short_description = 'Foydalanuvchi'
+        """⚠️ Eski metod, faqat qo'shimcha xavfsizlik uchun"""
+        return self.user_link_safe(obj)
+
+    def tariff_info(self, obj):
+        """Tarif ma'lumotlarini ko'rsatish"""
+        if obj and obj.tariff:
+            return format_html(
+                '<span title="{}">{} ta narxlash</span>',
+                obj.tariff.name,
+                obj.tariff.count
+            )
+        return '-'
+
+    tariff_info.short_description = 'Tarif'
 
     def formatted_amount(self, obj):
         """Summani formatlash"""
-        return f"{obj.amount:,.0f} so'm"
+        if obj and obj.amount:
+            return f"{obj.amount:,.0f} so'm"
+        return '-'
+
     formatted_amount.short_description = 'Summa'
+
+    def pricing_count_display(self, obj):
+        """Narxlashlar sonini ko'rsatish"""
+        if obj and obj.pricing_count:
+            return f"{obj.pricing_count} ta"
+        return '-'
+
+    pricing_count_display.short_description = 'Narxlashlar'
 
     def payme_transaction_short(self, obj):
         """Payme transaction ID ni qisqartirib ko'rsatish"""
-        if obj.payme_transaction_id:
-            short = obj.payme_transaction_id[:12] + '...'
+        if obj and obj.payme_transaction_id:
+            tx_id = obj.payme_transaction_id
+            if len(tx_id) > 15:
+                short = tx_id[:12] + '...'
+            else:
+                short = tx_id
             return format_html(
                 '<span style="font-family: monospace; font-size: 11px;" '
                 'title="{}">{}</span>',
-                obj.payme_transaction_id,
+                tx_id,
                 short
             )
         return '-'
+
     payme_transaction_short.short_description = 'Payme TX'
 
     def state_badge(self, obj):
         """Holat ko'rsatkichi"""
+        if not obj:
+            return '-'
+
         colors = {
             1: '#ff9800',  # Yaratildi (orange)
             2: '#4caf50',  # To'landi (green)
@@ -192,34 +237,48 @@ class PaymentAdmin(admin.ModelAdmin):
             -2: '#d32f2f',  # To'lovdan keyin bekor qilindi (dark red)
         }
         color = colors.get(obj.state, '#9e9e9e')
+
+        # State nomini olish
+        state_name = dict(Payment.STATE_CHOICES).get(obj.state, "Noma'lum")
+
         return format_html(
             '<span style="background-color: {}; color: white; padding: 4px 12px; '
             'border-radius: 12px; font-weight: bold; font-size: 11px; '
-            'display: inline-block;">{}</span>',
+            'display: inline-block;" title="{}">{}</span>',
             color,
-            obj.get_state_display()
+            f"State code: {obj.state}",
+            state_name
         )
+
     state_badge.short_description = 'Holati'
 
 
 @admin.register(PricingHistory)
 class PricingHistoryAdmin(admin.ModelAdmin):
-    list_display = ['user_link', 'phone_model', 'formatted_price', 'created_at']
+    list_display = ['user_link_safe', 'phone_model', 'formatted_price', 'created_at']
     list_filter = ['created_at']
     search_fields = ['user__telegram_id', 'user__full_name', 'phone_model']
     readonly_fields = ['user', 'phone_model', 'price', 'created_at']
     ordering = ['-created_at']
 
-    def user_link(self, obj):
-        return format_html(
-            '<a href="/admin/payments/botuser/{}/change/">{}</a>',
-            obj.user.id,
-            obj.user.full_name
-        )
-    user_link.short_description = 'Foydalanuvchi'
+    def user_link_safe(self, obj):
+        """Foydalanuvchi linkini ko'rsatish (safe versiya)"""
+        if obj and obj.user:
+            return format_html(
+                '<a href="/admin/payments/botuser/{}/change/">{}</a>',
+                obj.user.id,
+                obj.user.full_name
+            )
+        return format_html('<span style="color: #999;">Foydalanuvchi yo\'q</span>')
+
+    user_link_safe.short_description = 'Foydalanuvchi'
 
     def formatted_price(self, obj):
-        return f"{obj.price:,.2f} so'm"
+        """Narxni formatlash"""
+        if obj and obj.price:
+            return f"{obj.price:,.2f} so'm"
+        return '-'
+
     formatted_price.short_description = 'Narxi'
 
     def has_add_permission(self, request):
