@@ -350,123 +350,67 @@ def check_perform_transaction(params):
 
 
 def create_transaction(params):
-    """
-    CreateTransaction - Tranzaksiya yaratish
-    MUHIM: Test birinchi chaqiruvda tranzaksiya yaratishni kutadi!
-    """
     try:
         account = params.get("account", {})
         order_id = account.get("order_id")
-        amount_tiyin = params.get("amount")  # tiyinlarda
-        transaction_id = params.get("id")  # Payme tranzaksiya IDsi
+        amount_tiyin = params.get("amount")
+        transaction_id = params.get("id")  # Payme tranzaksiya ID
         transaction_time = params.get("time")
 
-        logger.info(f"📝 CreateTransaction: order_id={order_id}, amount={amount_tiyin}, tx_id={transaction_id}")
-
-        # 1. Barcha parametrlar mavjudligini tekshirish
         if not all([order_id, amount_tiyin, transaction_id, transaction_time]):
-            logger.error("❌ Missing required parameters")
             return {
                 "error": {
-                    "code": -32504,
+                    "code": -31050,
                     "message": "Required parameters missing"
                 }
             }
 
-        # 2. IDEMPOTENCY: Birinchi navbatda tranzaksiya ID bo'yicha tekshirish
+        # Faqat Payme transaction_id bo'yicha idempotency tekshiruvi
         existing_by_tx_id = Payment.objects.filter(
             payme_transaction_id=transaction_id
         ).first()
 
         if existing_by_tx_id:
-            logger.info(f"✅ Transaction already exists by tx_id: {transaction_id}")
-            # Idempotent javob - mavjud tranzaksiya ma'lumotlari
+            # Idempotent javob
             return {
-                "result": {
-                    "create_time": existing_by_tx_id.payme_create_time,
-                    "perform_time": 0,
-                    "cancel_time": 0,
-                    "transaction": existing_by_tx_id.payme_transaction_id,
-                    "state": existing_by_tx_id.state,
-                    "reason": None
-                }
+                "create_time": existing_by_tx_id.payme_create_time,
+                "perform_time": 0,
+                "cancel_time": 0,
+                "transaction": existing_by_tx_id.payme_transaction_id,
+                "state": existing_by_tx_id.state,
+                "reason": None
             }
 
-        # 3. ORDER_ID BO'YICHA TRANZAKSIYA BORMI? (ENG MUHIM!)
-        existing_by_order = Payment.objects.filter(order_id=order_id).first()
+        # !!! BU QISMNI O'CHIRING !!!
+        # existing_by_order = Payment.objects.filter(order_id=order_id).exists()
+        # if existing_by_order: ...
+        # ← Bu Payme talabiga zid!
 
-        if existing_by_order:
-            logger.warning(f"❌ Order already has transaction: {order_id}")
-            # Bu order_id uchun allaqachon tranzaksiya mavjud
-            return {
-                "error": {
-                    "code": -31050,
-                    "message": "Order already has transaction"
-                }
-            }
-
-        # 4. BUYURTMA TEKSHIRISH (ASL LOGIKANGIZ)
-        # Bu yerda sizning asl buyurtma bazangizdan order ni topish kerak
-        try:
-            # Masalan: order = Order.objects.get(order_id=order_id)
-            # Lekin test uchun oddiy yaratamiz
-            pass
-        except Exception as e:
-            logger.error(f"❌ Order not found: {order_id}")
-            return {
-                "error": {
-                    "code": -31050,
-                    "message": f"Order not found: {str(e)[:100]}"
-                }
-            }
-
-        # 5. MIQDORNI TEKSHIRISH
+        # Yangi tranzaksiya yaratish (har safar yangi payme_transaction_id bilan)
         amount_sum = Decimal(amount_tiyin) / Decimal(100)
-        # if order.amount != amount_sum:
-        #     logger.error(f"Amount mismatch: order={order.amount}, received={amount_sum}")
-        #     return {
-        #         "error": {
-        #             "code": -31001,
-        #             "message": "Amount mismatch"
-        #         }
-        #     }
-
-        # 6. YANGI TRANZAKSIYA YARATISH
-        # User va tariff ni topish kerak
-        # user = order.user
-        # tariff = order.tariff
-
         payment = Payment.objects.create(
             order_id=order_id,
             amount=amount_sum,
             payme_transaction_id=transaction_id,
             payme_create_time=transaction_time,
             state=Payment.STATE_CREATED,
-            # user=user,
-            # tariff=tariff,
-            # pricing_count=tariff.pricing_count,
+            # user va pricing_count keyinroq PerformTransaction da to'ldiriladi
         )
 
-        logger.info(f"✅ Transaction created: {payment.id}, order_id={order_id}")
-
-        # 7. SUCCESS RESPONSE
         return {
-            "result": {
-                "create_time": payment.payme_create_time,
-                "perform_time": 0,
-                "cancel_time": 0,
-                "transaction": payment.payme_transaction_id,
-                "state": payment.state,
-                "reason": None
-            }
+            "create_time": payment.payme_create_time,
+            "perform_time": 0,
+            "cancel_time": 0,
+            "transaction": payment.payme_transaction_id,
+            "state": payment.state,
+            "reason": None
         }
-
     except Exception as e:
-        logger.exception(f"❌ CreateTransaction error: {e}")
+        logger.exception("CreateTransaction unexpected error")
         return {
             "error": {
-                "code": -32400,
-                "message": f"System error: {str(e)[:100]}"
+                "code": -31008,
+                "message": f"Internal error: {str(e)[:150]}"
             }
         }
 
@@ -574,14 +518,12 @@ def cancel_transaction(params):
 
 
 def check_transaction(params):
-    """CheckTransaction - Tranzaksiya holatini tekshirish"""
     try:
         payme_id = params.get("id")
-
         if not payme_id:
             return {
                 "error": {
-                    "code": -32504,
+                    "code": -31003,
                     "message": "Transaction ID required"
                 }
             }
@@ -598,31 +540,21 @@ def check_transaction(params):
                 }
             }
 
-        # Vaqtlarni to'g'ri formatlash
-        perform_time = 0
-        if payment.performed_at:
-            perform_time = int(payment.performed_at.timestamp() * 1000)
-
-        cancel_time = 0
-        if payment.cancelled_at:
-            cancel_time = int(payment.cancelled_at.timestamp() * 1000)
-
         return {
-            "result": {
-                "create_time": payment.payme_create_time,
-                "perform_time": perform_time,
-                "cancel_time": cancel_time,
-                "transaction": payment.payme_transaction_id,
-                "state": payment.state,
-                "reason": payment.reason
-            }
+            "create_time": payment.payme_create_time,
+            "perform_time": int(payment.performed_at.timestamp() * 1000)
+                if payment.performed_at else 0,
+            "cancel_time": int(payment.cancelled_at.timestamp() * 1000)
+                if payment.cancelled_at else 0,
+            "transaction": payment.payme_transaction_id,
+            "state": payment.state,
+            "reason": payment.reason
         }
 
     except Exception as e:
-        logger.error(f"❌ CheckTransaction error: {e}")
         return {
             "error": {
-                "code": -32400,
+                "code": -31008,
                 "message": str(e)[:100]
             }
         }

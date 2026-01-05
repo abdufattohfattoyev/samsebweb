@@ -1,4 +1,3 @@
-# payments/models.py
 import uuid
 
 from django.db import models
@@ -118,7 +117,6 @@ class Payment(models.Model):
     # ===== 🔴 PAYME ORDER ID =====
     order_id = models.CharField(
         max_length=64,
-        unique=True,
         db_index=True,
         default=uuid.uuid4,
         verbose_name="Chek ID (Payme)"
