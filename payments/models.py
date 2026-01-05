@@ -101,6 +101,7 @@ class BotUser(models.Model):
 class Payment(models.Model):
     """To'lovlar tarixi (Payme mos)"""
 
+    # ===== PAYME STATE =====
     STATE_CREATED = 1
     STATE_COMPLETED = 2
     STATE_CANCELLED = -1
@@ -113,21 +114,19 @@ class Payment(models.Model):
         (STATE_CANCELLED_AFTER_COMPLETE, "To'lovdan keyin bekor qilindi"),
     ]
 
-    # order_id unique emas — bir xil order_id bilan ko'p tranzaksiya bo'lishi mumkin!
+    # ===== 🔴 PAYME ORDER ID =====
     order_id = models.CharField(
         max_length=64,
         db_index=True,
-        # unique=True olib tashlandi!!!
+        default=uuid.uuid4,
         verbose_name="Chek ID (Payme)"
     )
 
-    # CreateTransaction da hali user va pricing_count bilinmaydi → null=True
+    # ===== ALOQALAR =====
     user = models.ForeignKey(
         BotUser,
         on_delete=models.CASCADE,
         related_name="payments",
-        null=True,          # ← qo'shildi
-        blank=True,         # ← qo'shildi
         verbose_name="Foydalanuvchi"
     )
 
@@ -139,6 +138,7 @@ class Payment(models.Model):
         verbose_name="Tarif"
     )
 
+    # ===== SUMMA =====
     amount = models.DecimalField(
         max_digits=12,
         decimal_places=2,
@@ -148,11 +148,10 @@ class Payment(models.Model):
 
     pricing_count = models.PositiveIntegerField(
         validators=[MinValueValidator(1)],
-        null=True,          # ← qo'shildi
-        blank=True,         # ← qo'shildi
         verbose_name="Narxlashlar soni"
     )
 
+    # ===== PAYME TRANSACTION =====
     payme_transaction_id = models.CharField(
         max_length=255,
         null=True,
@@ -162,6 +161,7 @@ class Payment(models.Model):
         verbose_name="Payme tranzaksiya ID"
     )
 
+    # 🔴 MUHIM: Payme yuborgan create_time (millisekund)
     payme_create_time = models.BigIntegerField(
         null=True,
         blank=True,
@@ -175,6 +175,7 @@ class Payment(models.Model):
         verbose_name="Holati"
     )
 
+    # ===== VAQT MAYDONLARI =====
     created_at = models.DateTimeField(auto_now_add=True, verbose_name="Yaratilgan")
     performed_at = models.DateTimeField(null=True, blank=True, verbose_name="To'langan vaqt")
     cancelled_at = models.DateTimeField(null=True, blank=True, verbose_name="Bekor qilingan vaqt")
@@ -192,8 +193,7 @@ class Payment(models.Model):
         ]
 
     def __str__(self):
-        user_name = self.user.full_name if self.user else "Noma'lum"
-        return f"#{self.order_id} | {user_name} | {self.amount:,.0f} so'm"
+        return f"#{self.order_id} | {self.user.full_name} | {self.amount:,.0f} so'm"
 
     # ===== TO‘LOVNI TASDIQLASH =====
     def complete_payment(self, transaction_id=None):
