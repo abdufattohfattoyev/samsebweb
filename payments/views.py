@@ -266,180 +266,158 @@ def payme_callback(request):
 # ============= PAYME METHODS =============
 
 def check_perform_transaction(params):
-    """CheckPerformTransaction - To'lovni tekshirish"""
+    """
+    CheckPerformTransaction — to'lov mumkinligini tekshirish
+    """
     try:
-        account = params.get('account') or {}
-        order_id = account.get('order_id')
-        amount_tiyin = params.get('amount')
+        account = params.get("account") or {}
+        order_id = account.get("order_id")
+        amount_tiyin = params.get("amount")
 
         if not order_id:
             return {
-                'error': {
-                    'code': -31050,
-                    'message': {
-                        'uz': 'Buyurtma ID kiritilmagan',
-                        'ru': 'Не указан ID заказа',
-                        'en': 'Order ID not specified'
-                    }
+                "error": {
+                    "code": -31050,
+                    "message": {
+                        "uz": "Buyurtma ID ko‘rsatilmagan",
+                        "ru": "Не указан ID заказа",
+                        "en": "Order ID not specified",
+                    },
                 }
             }
 
         if not amount_tiyin:
             return {
-                'error': {
-                    'code': -31001,
-                    'message': {
-                        'uz': 'Summa kiritilmagan',
-                        'ru': 'Не указана сумма',
-                        'en': 'Amount not specified'
-                    }
+                "error": {
+                    "code": -31001,
+                    "message": {
+                        "uz": "Summa ko‘rsatilmagan",
+                        "ru": "Не указана сумма",
+                        "en": "Amount not specified",
+                    },
                 }
             }
 
-        # SHU YERDA SIZNING LOYIHANGIZDAGI BUYURTMA TEKSHIRISHI
-        # Misol uchun, sizning tizimingizda 'pending_payments' jadvali yoki cache bo'lishi kerak
-        from django.core.cache import cache
+        # 1️⃣ Buyurtma mavjudligini tekshirish
+        # BU YERDA: order_id bo‘yicha HAQIQIY BUYURTMA bo‘lishi kerak
+        # Agar sendagi buyurtma DB da bo‘lmasa — testda error bo‘ladi
+        order_exists = Payment.objects.filter(order_id=order_id).exists()
 
-        # Cache dan yoki ma'lumotlar bazasidan buyurtma ma'lumotlarini olish
-        order_data = cache.get(f"payme_order_{order_id}")
+        # Agar bu order ilgari to‘langan bo‘lsa — ruxsat yo‘q
+        completed_tx = Payment.objects.filter(
+            order_id=order_id,
+            state=Payment.STATE_COMPLETED
+        ).exists()
 
-        # Agar buyurtma ma'lumoti yo'q bo'lsa, bu test uchun yaratish
-        if not order_data:
-            # Test uchun: 500000 tiyin = 5000 so'm
-            # Loyihangiz bo'yicha, bu yerda haqiqiy buyurtma yaratishingiz kerak
-            amount_sum = Decimal(amount_tiyin) / Decimal(100)
+        if completed_tx:
+            return {
+                "error": {
+                    "code": -31099,
+                    "message": {
+                        "uz": "Bu buyurtma allaqachon to‘langan",
+                        "ru": "Этот заказ уже оплачен",
+                        "en": "Order already paid",
+                    },
+                }
+            }
 
-            # MISOL: Sizning loyihangizda Payment yaratish
-            # payment = Payment.objects.create(
-            #     order_id=order_id,
-            #     amount=amount_sum,
-            #     state=Payment.STATE_CREATED,
-            #     # user va boshqa maydonlar keyin to'ldiriladi
-            # )
+        # Agar faol tranzaksiya bo‘lsa — ruxsat yo‘q
+        active_tx = Payment.objects.filter(
+            order_id=order_id,
+            state=Payment.STATE_CREATED
+        ).exists()
 
-            # Yoki cache ga saqlash
-            cache.set(f"payme_order_{order_id}", {
-                "amount_tiyin": amount_tiyin,
-                "amount_sum": str(amount_sum),
-                "status": "pending",
-                "created_at": timezone.now().isoformat()
-            }, timeout=300)  # 5 daqiqa
+        if active_tx:
+            return {
+                "error": {
+                    "code": -31099,
+                    "message": {
+                        "uz": "Bu buyurtma uchun faol tranzaksiya mavjud",
+                        "ru": "По заказу уже есть активная транзакция",
+                        "en": "Active transaction exists",
+                    },
+                }
+            }
 
-        return {'allow': True}
+        return {"allow": True}
 
-    except Exception as e:
-        logger.error(f"CheckPerformTransaction error: {e}", exc_info=True)
+    except Exception:
+        logger.exception("CheckPerformTransaction error")
         return {
-            'error': {
-                'code': -31008,
-                'message': 'Internal error'
+            "error": {
+                "code": -31008,
+                "message": "Internal error",
             }
         }
 
 
 def create_transaction(params):
-    """CreateTransaction - Tranzaksiya yaratish"""
+    """
+    CreateTransaction — yangi Payme tranzaksiya yaratish
+    """
     try:
-        account = params.get("account", {})
+        account = params.get("account") or {}
         order_id = account.get("order_id")
         amount_tiyin = params.get("amount")
-        transaction_id = params.get("id")  # Payme tranzaksiya ID
-        transaction_time = params.get("time")
+        payme_tx_id = params.get("id")
+        payme_time = params.get("time")
 
-        if not all([order_id, amount_tiyin, transaction_id, transaction_time]):
+        if not all([order_id, amount_tiyin, payme_tx_id, payme_time]):
             return {
                 "error": {
                     "code": -31050,
-                    "message": "Required parameters missing"
+                    "message": "Required parameters missing",
                 }
             }
 
-        # 1. Idempotency: transaction_id bo'yicha tekshirish
-        existing_by_tx_id = Payment.objects.filter(
-            payme_transaction_id=transaction_id
+        # 1️⃣ Idempotency — Payme transaction ID bo‘yicha
+        tx_by_id = Payment.objects.filter(
+            payme_transaction_id=payme_tx_id
         ).first()
 
-        if existing_by_tx_id:
-            # Idempotent javob - bir xil transaction_id bilan qayta chaqirilganda
+        if tx_by_id:
             return {
-                "create_time": existing_by_tx_id.payme_create_time or 0,
-                "perform_time": 0,
-                "cancel_time": 0,
-                "transaction": existing_by_tx_id.payme_transaction_id,
-                "state": existing_by_tx_id.state,
-                "reason": None
+                "create_time": tx_by_id.payme_create_time,
+                "perform_time": tx_by_id.payme_perform_time or 0,
+                "cancel_time": tx_by_id.payme_cancel_time or 0,
+                "transaction": tx_by_id.payme_transaction_id,
+                "state": tx_by_id.state,
+                "reason": tx_by_id.reason,
             }
 
-        # 2. CheckPerformTransaction da tasdiqlangan buyurtmani tekshirish
-        from django.core.cache import cache
-        order_data = cache.get(f"payme_order_{order_id}")
-
-        if not order_data:
-            # CheckPerformTransaction o'tmagan yoki vaqti o'tgan
-            return {
-                "error": {
-                    "code": -31050,
-                    "message": {
-                        "uz": "Buyurtma topilmadi yoki vaqti o'tgan",
-                        "ru": "Заказ не найден или время истекло",
-                        "en": "Order not found or expired"
-                    }
-                }
-            }
-
-        # 3. Summani tekshirish
-        expected_amount = int(order_data.get("amount_tiyin", 0))
-        if amount_tiyin != expected_amount:
-            return {
-                "error": {
-                    "code": -31001,
-                    "message": {
-                        "uz": f"Noto'g'ri summa. Kutilgan: {expected_amount}",
-                        "ru": f"Неверная сумма. Ожидается: {expected_amount}",
-                        "en": f"Invalid amount. Expected: {expected_amount}"
-                    }
-                }
-            }
-
-        # 4. Hisob (order_id) holatini tekshirish
-        # Faqat faol (STATE_CREATED) holatdagilarni tekshirish
-        existing_active_payment = Payment.objects.filter(
+        # 2️⃣ Shu order bo‘yicha FAOL tranzaksiya bormi?
+        active_tx = Payment.objects.filter(
             order_id=order_id,
-            state=Payment.STATE_CREATED
+            state__in=[
+                Payment.STATE_CREATED,
+                Payment.STATE_COMPLETED,
+            ],
         ).first()
 
-        if existing_active_payment:
-            # Bu hisob allaqachon faol tranzaksiyaga ega
+        if active_tx:
             return {
                 "error": {
                     "code": -31099,
                     "message": {
-                        "uz": "Ushbu buyurtma uchun tranzaksiya allaqachon mavjud",
-                        "ru": "Для этого заказа уже существует транзакция",
-                        "en": "Transaction already exists for this order"
-                    }
+                        "uz": "Ushbu buyurtma bo‘yicha faol tranzaksiya mavjud",
+                        "ru": "По этому заказу уже есть активная транзакция",
+                        "en": "Active transaction already exists",
+                    },
                 }
             }
 
-        # 5. YANGI TO'LOV YARATISH
+        # 3️⃣ YANGI TRANZAKSIYA YARATISH
         amount_sum = Decimal(amount_tiyin) / Decimal(100)
 
-        # Loyihangiz bo'yicha: bu yerda real user_id va pricing_count ni topishingiz kerak
-        # Test uchun: default qiymatlar bilan yaratamiz
         payment = Payment.objects.create(
             order_id=order_id,
             amount=amount_sum,
-            payme_transaction_id=transaction_id,
-            payme_create_time=transaction_time,
+            payme_transaction_id=payme_tx_id,
+            payme_create_time=payme_time,
             state=Payment.STATE_CREATED,
-            # QAYSI USER UCHUN EKANLIGINI SIZNING LOYIHANGIZDA ANIQLASHINGIZ KERAK
-            # Misol: cache dan user_id ni olish yoki order_id dan parse qilish
-            user=None,  # Test uchun null qoldiramiz
-            pricing_count=100,  # Test uchun default qiymat
+            user=None,           # keyin bog‘laysan
+            pricing_count=1,     # default
         )
-
-        # Cache dan buyurtmani o'chirish yoki update qilish
-        cache.delete(f"payme_order_{order_id}")
 
         return {
             "create_time": payment.payme_create_time,
@@ -447,17 +425,18 @@ def create_transaction(params):
             "cancel_time": 0,
             "transaction": payment.payme_transaction_id,
             "state": payment.state,
-            "reason": None
+            "reason": None,
         }
 
-    except Exception as e:
-        logger.exception("CreateTransaction unexpected error")
+    except Exception:
+        logger.exception("CreateTransaction error")
         return {
             "error": {
                 "code": -31008,
-                "message": f"Internal error: {str(e)[:150]}"
+                "message": "Internal error",
             }
         }
+
 
 
 def perform_transaction(params):
