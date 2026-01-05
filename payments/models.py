@@ -115,7 +115,7 @@ class Payment(models.Model):
         (STATE_CANCELLED_AFTER_COMPLETE, "To'lovdan keyin bekor qilindi"),
     ]
 
-    # ===== 🔴 MAJBURIY: PAYME ORDER ID =====
+    # ===== 🔴 PAYME ORDER ID =====
     order_id = models.CharField(
         max_length=64,
         unique=True,
@@ -163,6 +163,13 @@ class Payment(models.Model):
         verbose_name="Payme tranzaksiya ID"
     )
 
+    # 🔴 MUHIM: Payme yuborgan create_time (millisekund)
+    payme_create_time = models.BigIntegerField(
+        null=True,
+        blank=True,
+        verbose_name="Payme create_time (ms)"
+    )
+
     state = models.IntegerField(
         choices=STATE_CHOICES,
         default=STATE_CREATED,
@@ -195,7 +202,6 @@ class Payment(models.Model):
         """
         Payme PerformTransaction uchun
         """
-        # 🔐 Idempotent himoya
         if self.state != self.STATE_CREATED:
             return False
 
@@ -210,7 +216,6 @@ class Payment(models.Model):
             "payme_transaction_id"
         ])
 
-        # Balansga qo‘shish
         self.user.add_balance(self.pricing_count)
         return True
 
@@ -225,7 +230,6 @@ class Payment(models.Model):
         elif self.state == self.STATE_COMPLETED:
             self.state = self.STATE_CANCELLED_AFTER_COMPLETE
 
-            # Balansni qaytarish
             if self.user.balance >= self.pricing_count:
                 self.user.balance -= self.pricing_count
                 self.user.save(update_fields=["balance", "updated_at"])

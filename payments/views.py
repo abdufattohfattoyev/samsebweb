@@ -496,32 +496,55 @@ def cancel_transaction(params):
         return {'error': {'code': -31008, 'message': str(e)[:100]}}
 
 
-
 def check_transaction(params):
-    """CheckTransaction - Tranzaksiya holatini tekshirish"""
+    """CheckTransaction - Tranzaksiya holatini tekshirish (Payme mos)"""
     try:
-        payme_id = params.get('id')
+        payme_id = params.get("id")
         if not payme_id:
-            return {'error': {'code': -31003, 'message': 'Transaction ID required'}}
+            return {
+                "error": {
+                    "code": -31003,
+                    "message": "Transaction ID required"
+                }
+            }
 
         try:
-            payment = Payment.objects.get(payme_transaction_id=payme_id)
+            payment = Payment.objects.get(
+                payme_transaction_id=payme_id
+            )
         except Payment.DoesNotExist:
-            return {'error': {'code': -31003, 'message': 'Transaction not found'}}
+            return {
+                "error": {
+                    "code": -31003,
+                    "message": "Transaction not found"
+                }
+            }
 
-        result = {
-            'create_time': int(payment.created_at.timestamp() * 1000),
-            'perform_time': int(payment.performed_at.timestamp() * 1000) if payment.performed_at else 0,
-            'cancel_time': int(payment.cancelled_at.timestamp() * 1000) if payment.cancelled_at else 0,
-            'transaction': str(payment.id),
-            'state': payment.state,
-            'reason': payment.reason if payment.reason is not None else None
+        return {
+            # 🔴 PAYME YUBORGAN TIME
+            "create_time": payment.payme_create_time,
+
+            # ⏱ Agar bo‘lsa, ms ga o‘tkaziladi
+            "perform_time": int(payment.performed_at.timestamp() * 1000)
+                if payment.performed_at else 0,
+
+            "cancel_time": int(payment.cancelled_at.timestamp() * 1000)
+                if payment.cancelled_at else 0,
+
+            # 🔴 PAYME TRANSACTION ID
+            "transaction": payment.payme_transaction_id,
+
+            "state": payment.state,
+            "reason": payment.reason
         }
 
-        return result
-
     except Exception as e:
-        return {'error': {'code': -31008, 'message': str(e)[:100]}}
+        return {
+            "error": {
+                "code": -31008,
+                "message": str(e)[:100]
+            }
+        }
 
 
 def get_statement(params):
