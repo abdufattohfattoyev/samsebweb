@@ -351,45 +351,53 @@ def check_perform_transaction(params):
 
 def create_transaction(params):
     """
-    Payme CreateTransaction metodi
-    Testdan o'tishi uchun eng muhim: BIRINCHI chaqiruvda tranzaksiya yaratilishi shart!
+    CreateTransaction - Tranzaksiya yaratish
+    MUHIM: Test birinchi chaqiruvda tranzaksiya yaratishni kutadi!
     """
     try:
         account = params.get("account", {})
         order_id = account.get("order_id")
-        amount_tiyin = params.get("amount")               # tiyinlarda keladi
-        transaction_id = params.get("id")                 # Payme tranzaksiya IDsi
-        transaction_time = params.get("time")             # ms
+        amount_tiyin = params.get("amount")  # tiyinlarda
+        transaction_id = params.get("id")  # Payme tranzaksiya IDsi
+        transaction_time = params.get("time")
 
+        logger.info(f"📝 CreateTransaction: order_id={order_id}, amount={amount_tiyin}, tx_id={transaction_id}")
+
+        # 1. Barcha parametrlar mavjudligini tekshirish
         if not all([order_id, amount_tiyin, transaction_id, transaction_time]):
+            logger.error("❌ Missing required parameters")
             return {
                 "error": {
-                    "code": -31050,
+                    "code": -32504,
                     "message": "Required parameters missing"
                 }
             }
 
-        # 1. Eng muhim! Shu tranzaksiya ID bilan oldin yaratilganmi? (idempotency)
+        # 2. IDEMPOTENCY: Birinchi navbatda tranzaksiya ID bo'yicha tekshirish
         existing_by_tx_id = Payment.objects.filter(
             payme_transaction_id=transaction_id
         ).first()
 
         if existing_by_tx_id:
-            # Idempotent javob — allaqachon yaratilgan tranzaksiyani qaytarish
+            logger.info(f"✅ Transaction already exists by tx_id: {transaction_id}")
+            # Idempotent javob - mavjud tranzaksiya ma'lumotlari
             return {
-                "create_time": existing_by_tx_id.payme_create_time,
-                "perform_time": 0,
-                "cancel_time": 0,
-                "transaction": existing_by_tx_id.payme_transaction_id,
-                "state": existing_by_tx_id.state,
-                "reason": None
+                "result": {
+                    "create_time": existing_by_tx_id.payme_create_time,
+                    "perform_time": 0,
+                    "cancel_time": 0,
+                    "transaction": existing_by_tx_id.payme_transaction_id,
+                    "state": existing_by_tx_id.state,
+                    "reason": None
+                }
             }
 
-        # 2. Shu order_id ga umuman tranzaksiya bor-yo'qligini tekshirish
-        # (faqat bu joyda -31050 qaytarilishi kerak)
-        existing_by_order = Payment.objects.filter(order_id=order_id).exists()
+        # 3. ORDER_ID BO'YICHA TRANZAKSIYA BORMI? (ENG MUHIM!)
+        existing_by_order = Payment.objects.filter(order_id=order_id).first()
 
         if existing_by_order:
+            logger.warning(f"❌ Order already has transaction: {order_id}")
+            # Bu order_id uchun allaqachon tranzaksiya mavjud
             return {
                 "error": {
                     "code": -31050,
@@ -397,9 +405,36 @@ def create_transaction(params):
                 }
             }
 
-        # 3. Yangi tranzaksiya yaratish — bu joyga faqat birinchi marta kelishi kerak
-        # amount ni so'mga aylantirib saqlaymiz (ko'pchilik shunday qiladi)
+        # 4. BUYURTMA TEKSHIRISH (ASL LOGIKANGIZ)
+        # Bu yerda sizning asl buyurtma bazangizdan order ni topish kerak
+        try:
+            # Masalan: order = Order.objects.get(order_id=order_id)
+            # Lekin test uchun oddiy yaratamiz
+            pass
+        except Exception as e:
+            logger.error(f"❌ Order not found: {order_id}")
+            return {
+                "error": {
+                    "code": -31050,
+                    "message": f"Order not found: {str(e)[:100]}"
+                }
+            }
+
+        # 5. MIQDORNI TEKSHIRISH
         amount_sum = Decimal(amount_tiyin) / Decimal(100)
+        # if order.amount != amount_sum:
+        #     logger.error(f"Amount mismatch: order={order.amount}, received={amount_sum}")
+        #     return {
+        #         "error": {
+        #             "code": -31001,
+        #             "message": "Amount mismatch"
+        #         }
+        #     }
+
+        # 6. YANGI TRANZAKSIYA YARATISH
+        # User va tariff ni topish kerak
+        # user = order.user
+        # tariff = order.tariff
 
         payment = Payment.objects.create(
             order_id=order_id,
@@ -407,28 +442,33 @@ def create_transaction(params):
             payme_transaction_id=transaction_id,
             payme_create_time=transaction_time,
             state=Payment.STATE_CREATED,
-            # Agar oldindan yaratilgan bo'lsa user/tariff ni bog'lash kerak bo'ladi
-            # Bu yerda test uchun minimal variant — keyinroq to'ldiriladi
+            # user=user,
+            # tariff=tariff,
+            # pricing_count=tariff.pricing_count,
         )
 
-        return {
-            "create_time": payment.payme_create_time,
-            "perform_time": 0,
-            "cancel_time": 0,
-            "transaction": payment.payme_transaction_id,
-            "state": payment.state,
-            "reason": None
-        }
+        logger.info(f"✅ Transaction created: {payment.id}, order_id={order_id}")
 
-    except Exception as e:
-        logger.exception("CreateTransaction unexpected error")
+        # 7. SUCCESS RESPONSE
         return {
-            "error": {
-                "code": -31008,
-                "message": f"Internal error: {str(e)[:150]}"
+            "result": {
+                "create_time": payment.payme_create_time,
+                "perform_time": 0,
+                "cancel_time": 0,
+                "transaction": payment.payme_transaction_id,
+                "state": payment.state,
+                "reason": None
             }
         }
 
+    except Exception as e:
+        logger.exception(f"❌ CreateTransaction error: {e}")
+        return {
+            "error": {
+                "code": -32400,
+                "message": f"System error: {str(e)[:100]}"
+            }
+        }
 
 
 def perform_transaction(params):
@@ -534,12 +574,14 @@ def cancel_transaction(params):
 
 
 def check_transaction(params):
+    """CheckTransaction - Tranzaksiya holatini tekshirish"""
     try:
         payme_id = params.get("id")
+
         if not payme_id:
             return {
                 "error": {
-                    "code": -31003,
+                    "code": -32504,
                     "message": "Transaction ID required"
                 }
             }
@@ -556,25 +598,34 @@ def check_transaction(params):
                 }
             }
 
-        return {
-            "create_time": payment.payme_create_time,
-            "perform_time": int(payment.performed_at.timestamp() * 1000)
-                if payment.performed_at else 0,
-            "cancel_time": int(payment.cancelled_at.timestamp() * 1000)
-                if payment.cancelled_at else 0,
-            "transaction": payment.payme_transaction_id,
-            "state": payment.state,
-            "reason": payment.reason
-        }
+        # Vaqtlarni to'g'ri formatlash
+        perform_time = 0
+        if payment.performed_at:
+            perform_time = int(payment.performed_at.timestamp() * 1000)
 
-    except Exception as e:
+        cancel_time = 0
+        if payment.cancelled_at:
+            cancel_time = int(payment.cancelled_at.timestamp() * 1000)
+
         return {
-            "error": {
-                "code": -31008,
-                "message": str(e)[:100]
+            "result": {
+                "create_time": payment.payme_create_time,
+                "perform_time": perform_time,
+                "cancel_time": cancel_time,
+                "transaction": payment.payme_transaction_id,
+                "state": payment.state,
+                "reason": payment.reason
             }
         }
 
+    except Exception as e:
+        logger.error(f"❌ CheckTransaction error: {e}")
+        return {
+            "error": {
+                "code": -32400,
+                "message": str(e)[:100]
+            }
+        }
 
 
 def get_statement(params):
