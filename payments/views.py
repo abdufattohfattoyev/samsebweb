@@ -365,7 +365,7 @@ def create_transaction(params):
                 }
             }
 
-        # Faqat Payme transaction_id bo'yicha idempotency tekshiruvi
+        # 1. Faqat Payme transaction_id bo'yicha idempotency tekshiruvi
         existing_by_tx_id = Payment.objects.filter(
             payme_transaction_id=transaction_id
         ).first()
@@ -381,12 +381,45 @@ def create_transaction(params):
                 "reason": None
             }
 
-        # !!! BU QISMNI O'CHIRING !!!
-        # existing_by_order = Payment.objects.filter(order_id=order_id).exists()
-        # if existing_by_order: ...
-        # ← Bu Payme talabiga zid!
+        # 2. Hisob (order_id) holatini tekshirish
+        # Agar bu order_id uchun faol tranzaksiya (state=1) bo'lsa, xato qaytarish
+        existing_active_payment = Payment.objects.filter(
+            order_id=order_id,
+            state=Payment.STATE_CREATED  # Faqat yaratilgan holatda
+        ).first()
 
-        # Yangi tranzaksiya yaratish (har safar yangi payme_transaction_id bilan)
+        if existing_active_payment:
+            return {
+                "error": {
+                    "code": -31099,
+                    "message": {
+                        "uz": "Ushbu buyurtma uchun tranzaksiya allaqachon mavjud",
+                        "ru": "Для этого заказа уже существует транзакция",
+                        "en": "Transaction already exists for this order"
+                    }
+                }
+            }
+
+        # 3. Agar oldin to'langan yoki bekor qilingan hisob bo'lsa
+        completed_or_cancelled_payment = Payment.objects.filter(
+            order_id=order_id,
+            state__in=[Payment.STATE_COMPLETED, Payment.STATE_CANCELLED,
+                      Payment.STATE_CANCELLED_AFTER_COMPLETE]
+        ).first()
+
+        if completed_or_cancelled_payment:
+            return {
+                "error": {
+                    "code": -31099,
+                    "message": {
+                        "uz": "Ushbu buyurtma allaqachon to'langan yoki bekor qilingan",
+                        "ru": "Этот заказ уже оплачен или отменен",
+                        "en": "This order is already paid or cancelled"
+                    }
+                }
+            }
+
+        # 4. Yangi tranzaksiya yaratish
         amount_sum = Decimal(amount_tiyin) / Decimal(100)
         payment = Payment.objects.create(
             order_id=order_id,
