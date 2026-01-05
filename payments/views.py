@@ -13,7 +13,7 @@ from rest_framework import status
 from django.conf import settings
 from .models import BotUser, Payment, PricingTariff, PricingHistory
 from .payme_utils import create_payme_link, check_payme_auth, tiyin_to_sum, sum_to_tiyin
-
+from django.db import models
 logger = logging.getLogger(__name__)
 
 
