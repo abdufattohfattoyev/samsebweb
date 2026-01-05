@@ -354,39 +354,30 @@ def create_transaction(params):
         account = params.get("account", {})
         order_id = account.get("order_id")
         amount = params.get("amount")
-        payme_id = params.get("id")
+        payme_transaction_id = params.get("id")          # Payme tranzaksiya IDsi
         payme_time = params.get("time")
 
-        if not all([order_id, amount, payme_id, payme_time]):
-            return {
-                "error": {
-                    "code": -31050,
-                    "message": "Invalid parameters"
-                }
-            }
+        if not all([order_id, amount, payme_transaction_id, payme_time]):
+            return {"error": {"code": -31050, "message": "Invalid parameters"}}
 
-        # 1️⃣ Shu payme_id bilan transaction bormi?
-        payment = Payment.objects.filter(
-            payme_transaction_id=payme_id
-        ).first()
-
+        # 1. Shu payme_transaction_id bilan allaqachon tranzaksiya bor-yo'qligini tekshirish
+        # (eng muhim qism — idempotency)
+        payment = Payment.objects.filter(payme_transaction_id=payme_transaction_id).first()
         if payment:
+            # Agar shu tranzaksiya ID bilan allaqachon yaratilgan bo'lsa — eski ma'lumotni qaytarish
             return {
                 "create_time": payment.payme_create_time,
                 "perform_time": 0,
                 "cancel_time": 0,
                 "transaction": payment.payme_transaction_id,
                 "state": payment.state,
-                "reason": payment.reason
+                "reason": None
             }
 
-        # 2️⃣ Shu order uchun ACTIVE transaction bormi?
-        existing = Payment.objects.filter(
-            order_id=order_id,
-            state=1  # CREATED
-        ).first()
-
-        if existing:
+        # 2. Shu order_id ga bog'langan tranzaksiya borligini tekshirish
+        existing_payment = Payment.objects.filter(order_id=order_id).first()
+        if existing_payment:
+            # Bu order uchun tranzaksiya allaqachon bor → xato
             return {
                 "error": {
                     "code": -31050,
@@ -394,13 +385,15 @@ def create_transaction(params):
                 }
             }
 
-        # 3️⃣ YANGI transaction yaratamiz
+        # 3. Yangi tranzaksiya yaratish
         payment = Payment.objects.create(
             order_id=order_id,
-            amount=amount,
-            payme_transaction_id=payme_id,
+            amount=tiyin_to_sum(amount),  # tiyin → so'm
+            payme_transaction_id=payme_transaction_id,
             payme_create_time=payme_time,
-            state=1
+            state=Payment.STATE_CREATED,
+            # user va tariff ni keyinroq bog'lashingiz mumkin
+            # yoki create_payment da oldindan yaratilgan bo'lsa — shuni olish
         )
 
         return {
@@ -413,12 +406,8 @@ def create_transaction(params):
         }
 
     except Exception as e:
-        return {
-            "error": {
-                "code": -31008,
-                "message": str(e)[:100]
-            }
-        }
+        logger.error(f"CreateTransaction error: {e}", exc_info=True)
+        return {"error": {"code": -31008, "message": str(e)[:200]}}
 
 
 
