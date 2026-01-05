@@ -365,7 +365,7 @@ def create_transaction(params):
                 }
             }
 
-        # Idempotency: bir xil Payme transaction_id bilan takror chaqiruv
+        # 1. Idempotency: bir xil Payme transaction_id bilan takror chaqiruv
         existing = Payment.objects.filter(payme_transaction_id=transaction_id).first()
         if existing:
             return {
@@ -377,24 +377,53 @@ def create_transaction(params):
                 "reason": existing.reason
             }
 
-        # Yangi tranzaksiya yaratish
+        # 2. Muhim! Shu order_id uchun allaqachon faol tranzaksiya bor-yo'qligini tekshirish
+        active_payment = Payment.objects.filter(
+            order_id=order_id,
+            state=Payment.STATE_CREATED
+        ).first()
+
+        if active_payment:
+            # Allaqachon boshqa tranzaksiya bu order_id ni "egallagan"
+            return {
+                "error": {
+                    "code": -31050,  # yoki -31099 ham bo'laveradi
+                    "message": "Order already has an active transaction"
+                }
+            }
+
+        # 3. Yangi tranzaksiya yaratish
         amount_sum = Decimal(amount_tiyin) / Decimal(100)
 
-        payment = Payment.objects.create(
-            order_id=order_id,
-            amount=amount_sum,
-            payme_transaction_id=transaction_id,
-            payme_create_time=transaction_time,
-            state=Payment.STATE_CREATED,
-            # user va pricing_count hali yo'q → PerformTransaction da to'ldiriladi
-        )
+        try:
+            payment = Payment.objects.get(order_id=order_id, state=Payment.STATE_CREATED)
+        except Payment.DoesNotExist:
+            return {
+                "error": {
+                    "code": -31050,
+                    "message": "Order not found"
+                }
+            }
+
+        if sum_to_tiyin(payment.amount) != amount_tiyin:
+            return {
+                "error": {
+                    "code": -31001,
+                    "message": "Invalid amount"
+                }
+            }
+
+        # Payme ma'lumotlarini to'ldirish
+        payment.payme_transaction_id = transaction_id
+        payment.payme_create_time = transaction_time
+        payment.save(update_fields=['payme_transaction_id', 'payme_create_time'])
 
         return {
-            "create_time": payment.payme_create_time,
+            "create_time": transaction_time,
             "perform_time": 0,
             "cancel_time": 0,
-            "transaction": payment.payme_transaction_id,
-            "state": payment.state,
+            "transaction": transaction_id,
+            "state": Payment.STATE_CREATED,
             "reason": None
         }
 
