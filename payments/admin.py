@@ -3,6 +3,8 @@
 from django.contrib import admin
 from django.utils.html import format_html
 from django.urls import reverse
+from django.utils.safestring import mark_safe
+
 from .models import PricingTariff, BotUser, Payment, PricingHistory
 
 
@@ -51,206 +53,169 @@ class BotUserAdmin(admin.ModelAdmin):
 
 @admin.register(Payment)
 class PaymentAdmin(admin.ModelAdmin):
-    """
-    ✅ Xatolar tuzatildi:
-    1. user_link metodida NoneType xatosi tuzatildi
-    2. Order ID ko'rsatishda xatolar tuzatildi
-    """
 
-    list_display = [
+    list_display = (
         'id',
         'order_id_display',
-        'user_link_safe',  # ✅ Safe versiyasi
+        'user_link_safe',
         'tariff_info',
         'formatted_amount',
         'pricing_count_display',
         'state_badge',
         'payme_transaction_short',
-        'created_at'
-    ]
+        'created_at',
+    )
 
-    list_filter = ['state', 'created_at']
+    list_filter = ('state', 'created_at')
 
-    search_fields = [
-        'id',
+    search_fields = (
         'order_id',
         'payme_transaction_id',
         'user__telegram_id',
         'user__full_name',
-        'user__username'
-    ]
+        'user__username',
+    )
 
-    readonly_fields = [
+    readonly_fields = (
         'id',
-        'order_id',
-        'payme_transaction_id',
         'created_at',
         'performed_at',
         'cancelled_at',
-        'order_id_copy_button'
-    ]
+        'order_id_copy_button',
+    )
 
-    ordering = ['-created_at']
+    ordering = ('-created_at',)
 
     fieldsets = (
-        ('📋 Buyurtma ma\'lumotlari', {
+        ("📋 Buyurtma ma'lumotlari", {
             'fields': (
                 'id',
                 'order_id',
                 'order_id_copy_button',
                 'user',
-                'tariff'
+                'tariff',
             )
         }),
-        ('💰 To\'lov ma\'lumotlari', {
+        ("💰 To'lov ma'lumotlari", {
             'fields': ('amount', 'pricing_count')
         }),
-        ('🔐 Payme ma\'lumotlari', {
+        ("🔐 Payme ma'lumotlari", {
             'fields': ('payme_transaction_id', 'state', 'reason')
         }),
-        ('🕐 Vaqt', {
-            'fields': ('created_at', 'performed_at', 'cancelled_at'),
+        ("🕐 Vaqt", {
+            'fields': ('created_at', 'performed_at', 'cancelled_at')
         }),
     )
 
+    # ================= DISPLAY METHODS =================
+
     def order_id_display(self, obj):
-        """Order ID ni qisqartirib ko'rsatish"""
-        if obj.order_id:
-            order_str = str(obj.order_id)
-            if len(order_str) > 16:
-                short_id = order_str[:8] + '...' + order_str[-8:]
-            else:
-                short_id = order_str
-            return format_html(
-                '<span style="font-family: monospace; background: #f0f0f0; '
-                'padding: 2px 6px; border-radius: 3px;" title="{}">{}</span>',
-                obj.order_id,
-                short_id
-            )
-        return '-'
+        if not obj.order_id:
+            return "—"
 
-    order_id_display.short_description = 'Order ID'
-
-    def order_id_copy_button(self, obj):
-        """Order ID ni nusxalash uchun tugma"""
-        if obj and obj.order_id:
-            return format_html(
-                '<div style="margin: 10px 0;">'
-                '<input type="text" value="{}" id="order_id_field" '
-                'style="width: 100%; padding: 8px; font-family: monospace; '
-                'border: 1px solid #ccc; border-radius: 4px;" readonly>'
-                '<button type="button" onclick="copyOrderId()" '
-                'style="margin-top: 8px; padding: 8px 16px; background: #417690; '
-                'color: white; border: none; border-radius: 4px; cursor: pointer;">'
-                '📋 Nusxalash</button>'
-                '<span id="copy_status" style="margin-left: 10px; color: green;"></span>'
-                '</div>'
-                '<script>'
-                'function copyOrderId() {{'
-                '  var field = document.getElementById("order_id_field");'
-                '  field.select();'
-                '  document.execCommand("copy");'
-                '  document.getElementById("copy_status").innerHTML = "✅ Nusxalandi!";'
-                '  setTimeout(function() {{'
-                '    document.getElementById("copy_status").innerHTML = "";'
-                '  }}, 2000);'
-                '}}'
-                '</script>',
-                obj.order_id
-            )
-        return '-'
-
-    order_id_copy_button.short_description = 'Order ID (test uchun)'
-
-    def user_link_safe(self, obj):
-        """✅ Foydalanuvchi linkini ko'rsatish (safe versiya)"""
-        if obj and obj.user:
-            return format_html(
-                '<a href="/admin/payments/botuser/{}/change/" title="Telegram ID: {}">{}</a>',
-                obj.user.id,
-                obj.user.telegram_id,
-                obj.user.full_name
-            )
-        return format_html('<span style="color: #999;">Foydalanuvchi yo\'q</span>')
-
-    user_link_safe.short_description = 'Foydalanuvchi'
-
-    def user_link(self, obj):
-        """⚠️ Eski metod, faqat qo'shimcha xavfsizlik uchun"""
-        return self.user_link_safe(obj)
-
-    def tariff_info(self, obj):
-        """Tarif ma'lumotlarini ko'rsatish"""
-        if obj and obj.tariff:
-            return format_html(
-                '<span title="{}">{} ta narxlash</span>',
-                obj.tariff.name,
-                obj.tariff.count
-            )
-        return '-'
-
-    tariff_info.short_description = 'Tarif'
-
-    def formatted_amount(self, obj):
-        """Summani formatlash"""
-        if obj and obj.amount:
-            return f"{obj.amount:,.0f} so'm"
-        return '-'
-
-    formatted_amount.short_description = 'Summa'
-
-    def pricing_count_display(self, obj):
-        """Narxlashlar sonini ko'rsatish"""
-        if obj and obj.pricing_count:
-            return f"{obj.pricing_count} ta"
-        return '-'
-
-    pricing_count_display.short_description = 'Narxlashlar'
-
-    def payme_transaction_short(self, obj):
-        """Payme transaction ID ni qisqartirib ko'rsatish"""
-        if obj and obj.payme_transaction_id:
-            tx_id = obj.payme_transaction_id
-            if len(tx_id) > 15:
-                short = tx_id[:12] + '...'
-            else:
-                short = tx_id
-            return format_html(
-                '<span style="font-family: monospace; font-size: 11px;" '
-                'title="{}">{}</span>',
-                tx_id,
-                short
-            )
-        return '-'
-
-    payme_transaction_short.short_description = 'Payme TX'
-
-    def state_badge(self, obj):
-        """Holat ko'rsatkichi"""
-        if not obj:
-            return '-'
-
-        colors = {
-            1: '#ff9800',  # Yaratildi (orange)
-            2: '#4caf50',  # To'landi (green)
-            -1: '#f44336',  # Bekor qilindi (red)
-            -2: '#d32f2f',  # To'lovdan keyin bekor qilindi (dark red)
-        }
-        color = colors.get(obj.state, '#9e9e9e')
-
-        # State nomini olish
-        state_name = dict(Payment.STATE_CHOICES).get(obj.state, "Noma'lum")
+        oid = str(obj.order_id)
+        short = oid[:8] + "..." + oid[-8:] if len(oid) > 16 else oid
 
         return format_html(
-            '<span style="background-color: {}; color: white; padding: 4px 12px; '
-            'border-radius: 12px; font-weight: bold; font-size: 11px; '
-            'display: inline-block;" title="{}">{}</span>',
-            color,
-            f"State code: {obj.state}",
-            state_name
+            '<span style="font-family:monospace;background:#f2f2f2;'
+            'padding:3px 6px;border-radius:4px" title="{}">{}</span>',
+            oid,
+            short,
         )
 
-    state_badge.short_description = 'Holati'
+    order_id_display.short_description = "Order ID"
+
+    def order_id_copy_button(self, obj):
+        if not obj or not obj.order_id:
+            return "—"
+
+        return mark_safe(f"""
+        <input id="order_id_copy"
+               value="{obj.order_id}"
+               style="width:100%;padding:6px;font-family:monospace"
+               readonly>
+
+        <button type="button"
+                onclick="navigator.clipboard.writeText(document.getElementById('order_id_copy').value)"
+                style="margin-top:6px;padding:6px 14px;
+                       background:#417690;color:white;
+                       border:none;border-radius:4px;cursor:pointer;">
+            📋 Nusxalash
+        </button>
+        """)
+
+    order_id_copy_button.short_description = "Order ID nusxalash"
+
+    def user_link_safe(self, obj):
+        if not obj.user:
+            return format_html('<span style="color:#999">Foydalanuvchi yo‘q</span>')
+
+        url = reverse("admin:payments_botuser_change", args=[obj.user.id])
+        return format_html(
+            '<a href="{}" title="Telegram ID: {}">{}</a>',
+            url,
+            obj.user.telegram_id,
+            obj.user.full_name,
+        )
+
+    user_link_safe.short_description = "Foydalanuvchi"
+
+    def tariff_info(self, obj):
+        if not obj.tariff:
+            return "—"
+
+        return format_html(
+            '<span title="{}">{} ta</span>',
+            obj.tariff.name,
+            obj.tariff.count,
+        )
+
+    tariff_info.short_description = "Tarif"
+
+    def formatted_amount(self, obj):
+        return f"{obj.amount:,.0f} so'm" if obj.amount else "—"
+
+    formatted_amount.short_description = "Summa"
+
+    def pricing_count_display(self, obj):
+        return f"{obj.pricing_count} ta" if obj.pricing_count else "—"
+
+    pricing_count_display.short_description = "Narxlashlar"
+
+    def payme_transaction_short(self, obj):
+        if not obj.payme_transaction_id:
+            return "—"
+
+        tx = obj.payme_transaction_id
+        short = tx[:12] + "..." if len(tx) > 15 else tx
+
+        return format_html(
+            '<span style="font-family:monospace;font-size:11px" title="{}">{}</span>',
+            tx,
+            short,
+        )
+
+    payme_transaction_short.short_description = "Payme TX"
+
+    def state_badge(self, obj):
+        colors = {
+            Payment.STATE_CREATED: "#ff9800",
+            Payment.STATE_COMPLETED: "#4caf50",
+            Payment.STATE_CANCELLED: "#f44336",
+            Payment.STATE_CANCELLED_AFTER_COMPLETE: "#b71c1c",
+        }
+
+        color = colors.get(obj.state, "#9e9e9e")
+        name = dict(Payment.STATE_CHOICES).get(obj.state, "Noma'lum")
+
+        return format_html(
+            '<span style="background:{};color:white;padding:4px 10px;'
+            'border-radius:12px;font-size:11px;font-weight:bold">{}</span>',
+            color,
+            name,
+        )
+
+    state_badge.short_description = "Holati"
 
 
 @admin.register(PricingHistory)
