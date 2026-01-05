@@ -263,10 +263,13 @@ def payme_callback(request):
         }, status=200)
 
 
-# ============= PAYME METHODS =============
+## ============= PAYME METHODS (TO'LIQ VA TUZATILGAN) =============
 
 def check_perform_transaction(params):
-    """CheckPerformTransaction - to'lovni tekshirish"""
+    """
+    CheckPerformTransaction - To'lov ruxsatini tekshirish.
+    Payme tranzaksiya yaratishdan oldin summani va buyurtmani tekshiradi.
+    """
     account = params.get("account", {})
     order_id = account.get("order_id")
     amount_tiyin = params.get("amount")
@@ -274,68 +277,65 @@ def check_perform_transaction(params):
     if not order_id:
         return {"error": {"code": -31050, "message": "Order ID not specified"}}
 
-    if not amount_tiyin:
-        return {"error": {"code": -31001, "message": "Amount not specified"}}
+    try:
+        payment = Payment.objects.get(order_id=order_id)
 
-    from django.core.cache import cache
+        # 1. Summani tekshirish (Tiyin vs So'm)
+        if sum_to_tiyin(payment.amount) != int(amount_tiyin):
+            return {"error": {"code": -31001, "message": "Incorrect amount"}}
 
-    order_data = cache.get(f"payme_order_{order_id}")
-    if not order_data:
-        # yangi buyurtma yaratish test uchun
-        cache.set(f"payme_order_{order_id}", {
-            "amount_tiyin": amount_tiyin,
-            "status": "pending",
-            "created_at": timezone.now().isoformat()
-        }, timeout=300)
+        # 2. To'lov holatini tekshirish (Faqat 'Yaratildi' holatida bo'lishi kerak)
+        if payment.state != Payment.STATE_CREATED:
+            return {"error": {"code": -31099, "message": "Order is not available for payment"}}
 
-    # Agar oldingi active payment bo'lsa, allow true bo‘lsin, lekin CreateTransaction tekshiradi
-    return {"allow": True}
+        return {"allow": True}
+
+    except Payment.DoesNotExist:
+        return {"error": {"code": -31050, "message": "Order not found"}}
 
 
 def create_transaction(params):
-    """CreateTransaction - Tranzaksiya yaratish"""
-    account = params.get("account", {})
-    order_id = account.get("order_id")
-    amount_tiyin = params.get("amount")
+    """
+    CreateTransaction - Tranzaksiyani yaratish yoki mavjudini qaytarish.
+    Idempotentlik: Agar bir xil tranzaksiya ID kelsa, yangi yaratmaymiz, borini qaytaramiz.
+    """
     transaction_id = params.get("id")
     transaction_time = params.get("time")
+    amount_tiyin = params.get("amount")
+    account = params.get("account", {})
+    order_id = account.get("order_id")
 
-    if not all([order_id, amount_tiyin, transaction_id, transaction_time]):
-        return {"error": {"code": -31050, "message": "Required parameters missing"}}
-
-    # 1️⃣ Idempotency check
+    # 1. Tranzaksiyani ID bo'yicha qidirish (Idempotency check)
     existing_tx = Payment.objects.filter(payme_transaction_id=transaction_id).first()
     if existing_tx:
         return {
-            "create_time": existing_tx.payme_create_time or 0,
-            "perform_time": 0,
-            "cancel_time": 0,
+            "create_time": existing_tx.payme_create_time,
+            "perform_time": int(existing_tx.performed_at.timestamp() * 1000) if existing_tx.performed_at else 0,
+            "cancel_time": int(existing_tx.cancelled_at.timestamp() * 1000) if existing_tx.cancelled_at else 0,
             "transaction": existing_tx.payme_transaction_id,
             "state": existing_tx.state,
-            "reason": None
+            "reason": existing_tx.reason
         }
 
-    # 2️⃣ Oldingi payment bo'lsa va hali to'lanmagan → -31099
-    existing_payment = Payment.objects.filter(order_id=order_id, state=Payment.STATE_CREATED).first()
-    if existing_payment:
-        return {"error": {"code": -31099, "message": "Transaction already exists for this order"}}
+    # 2. Buyurtmani tekshirish
+    try:
+        payment = Payment.objects.get(order_id=order_id)
+    except Payment.DoesNotExist:
+        return {"error": {"code": -31050, "message": "Order not found"}}
 
-    # 3️⃣ Yangi payment yaratish
-    amount_sum = Decimal(amount_tiyin) / Decimal(100)
-    from django.core.cache import cache
-    user_id = None  # test uchun
-    payment = Payment.objects.create(
-        order_id=order_id,
-        amount=amount_sum,
-        payme_transaction_id=transaction_id,
-        payme_create_time=transaction_time,
-        state=Payment.STATE_CREATED,
-        user_id=user_id,
-        pricing_count=1  # test uchun default
-    )
+    # 3. Buyurtma allaqachon boshqa tranzaksiya bilan bandmi?
+    if payment.payme_transaction_id and payment.payme_transaction_id != transaction_id:
+        return {"error": {"code": -31099, "message": "Order has another transaction"}}
 
-    # cache dan o'chirish
-    cache.delete(f"payme_order_{order_id}")
+    # 4. Summa mosligini tekshirish
+    if sum_to_tiyin(payment.amount) != int(amount_tiyin):
+        return {"error": {"code": -31001, "message": "Incorrect amount"}}
+
+    # 5. Hammasi to'g'ri bo'lsa, tranzaksiya ma'lumotlarini saqlaymiz
+    payment.payme_transaction_id = transaction_id
+    payment.payme_create_time = transaction_time
+    payment.state = Payment.STATE_CREATED
+    payment.save()
 
     return {
         "create_time": payment.payme_create_time,
@@ -348,150 +348,108 @@ def create_transaction(params):
 
 
 def perform_transaction(params):
-    """PerformTransaction - To'lovni tasdiqlash"""
+    """
+    PerformTransaction - To'lovni tasdiqlash va foydalanuvchi balansiga qo'shish.
+    """
+    payme_id = params.get('id')
+
     try:
-        payme_id = params.get('id')
-        logger.info(f"✅ PerformTransaction: payme_id={payme_id}")
+        payment = Payment.objects.get(payme_transaction_id=payme_id)
 
-        if not payme_id:
-            return {'error': {'code': -31003, 'message': 'Transaction ID required'}}
-
-        try:
-            payment = Payment.objects.get(payme_transaction_id=payme_id)
-        except Payment.DoesNotExist:
-            logger.warning(f"❌ Transaction not found: {payme_id}")
-            return {'error': {'code': -31003, 'message': 'Transaction not found'}}
-
+        # Tranzaksiya holati 'Yaratildi' bo'lsa, uni 'To'landi' holatiga o'tkazamiz
         if payment.state == Payment.STATE_CREATED:
             with db_transaction.atomic():
                 payment.state = Payment.STATE_COMPLETED
                 payment.performed_at = timezone.now()
                 payment.save()
 
+                # Foydalanuvchi balansini oshirish
                 user = payment.user
-                old_balance = user.balance
                 user.balance += payment.pricing_count
                 user.save()
 
-                logger.info(
-                    f"✅ Payment completed: #{payment.id}, user: {user.telegram_id}, balance: {old_balance} -> {user.balance}")
-
             return {
-                'transaction': str(payment.id),
-                'perform_time': int(payment.performed_at.timestamp() * 1000),
-                'state': payment.state
+                "transaction": payment.payme_transaction_id,
+                "perform_time": int(payment.performed_at.timestamp() * 1000),
+                "state": payment.state
             }
 
+        # Agar allaqachon to'langan bo'lsa (Idempotent response)
         elif payment.state == Payment.STATE_COMPLETED:
-            # Idempotent: Avvalgi response qaytarish
-            perform_time = int(payment.performed_at.timestamp() * 1000) if payment.performed_at else 0
             return {
-                'transaction': str(payment.id),
-                'perform_time': perform_time,
-                'state': payment.state
+                "transaction": payment.payme_transaction_id,
+                "perform_time": int(payment.performed_at.timestamp() * 1000),
+                "state": payment.state
             }
 
         else:
-            logger.warning(f"❌ Cannot perform transaction in state: {payment.state}")
-            return {'error': {'code': -31008, 'message': f'Cannot perform transaction in state: {payment.state}'}}
+            return {"error": {"code": -31008, "message": "Cannot perform transaction"}}
 
-    except Exception as e:
-        logger.error(f"❌ PerformTransaction error: {e}", exc_info=True)
-        return {'error': {'code': -31008, 'message': str(e)[:100]}}
+    except Payment.DoesNotExist:
+        return {"error": {"code": -31003, "message": "Transaction not found"}}
 
 
 def cancel_transaction(params):
-    """CancelTransaction - Tranzaksiyani bekor qilish"""
+    """
+    CancelTransaction - Tranzaksiyani bekor qilish.
+    """
+    payme_id = params.get('id')
+    reason = params.get('reason')
+
     try:
-        payme_id = params.get('id')
-        reason = params.get('reason')
+        payment = Payment.objects.get(payme_transaction_id=payme_id)
 
-        if not payme_id:
-            return {'error': {'code': -31003, 'message': 'Transaction ID required'}}
-
-        try:
-            payment = Payment.objects.get(payme_transaction_id=payme_id)
-        except Payment.DoesNotExist:
-            return {'error': {'code': -31003, 'message': 'Transaction not found'}}
-
-        # ✅ Idempotent tekshiruv
+        # 1. Allaqachon bekor qilingan bo'lsa (Idempotent)
         if payment.state in [Payment.STATE_CANCELLED, Payment.STATE_CANCELLED_AFTER_COMPLETE]:
             return {
-                'transaction': str(payment.id),
-                'cancel_time': int(payment.cancelled_at.timestamp() * 1000),
-                'state': payment.state
+                "transaction": payment.payme_transaction_id,
+                "cancel_time": int(payment.cancelled_at.timestamp() * 1000),
+                "state": payment.state
             }
 
-        # Holatni o‘zgartirish
+        # 2. Bekor qilish mantiqi
         if payment.state == Payment.STATE_CREATED:
             payment.state = Payment.STATE_CANCELLED
         elif payment.state == Payment.STATE_COMPLETED:
+            # To'lov bajarilgandan keyin bekor bo'lsa, balansdan ayiramiz
             payment.state = Payment.STATE_CANCELLED_AFTER_COMPLETE
-            # balansni kamaytirish
             if payment.user.balance >= payment.pricing_count:
                 payment.user.balance -= payment.pricing_count
-                payment.user.save(update_fields=['balance'])
+                payment.user.save()
 
-        # cancel_time va reason saqlash
         payment.cancelled_at = timezone.now()
-        if reason is not None:
-            payment.reason = reason
-
-        payment.save(update_fields=['state', 'cancelled_at', 'reason'])
+        payment.reason = reason
+        payment.save()
 
         return {
-            'transaction': str(payment.id),
-            'cancel_time': int(payment.cancelled_at.timestamp() * 1000),
-            'state': payment.state
+            "transaction": payment.payme_transaction_id,
+            "cancel_time": int(payment.cancelled_at.timestamp() * 1000),
+            "state": payment.state
         }
 
-    except Exception as e:
-        return {'error': {'code': -31008, 'message': str(e)[:100]}}
+    except Payment.DoesNotExist:
+        return {"error": {"code": -31003, "message": "Transaction not found"}}
 
 
 def check_transaction(params):
+    """
+    CheckTransaction - Tranzaksiya holatini tekshirish.
+    """
+    payme_id = params.get("id")
+
     try:
-        transaction_id = params.get("id")
-        if not transaction_id:
-            return {
-                "error": {
-                    "code": -31003,
-                    "message": "Transaction ID required"
-                }
-            }
-
-        # Payme transaction_id yoki order_id orqali qidirish
-        payment = Payment.objects.filter(
-            models.Q(payme_transaction_id=transaction_id) |
-            models.Q(order_id=transaction_id)
-        ).first()
-
-        if not payment:
-            return {
-                "error": {
-                    "code": -31003,
-                    "message": "Transaction not found"
-                }
-            }
+        payment = Payment.objects.get(payme_transaction_id=payme_id)
 
         return {
             "create_time": payment.payme_create_time or 0,
-            "perform_time": int(payment.performed_at.timestamp() * 1000)
-                if payment.performed_at else 0,
-            "cancel_time": int(payment.cancelled_at.timestamp() * 1000)
-                if payment.cancelled_at else 0,
-            "transaction": payment.payme_transaction_id or payment.order_id,
+            "perform_time": int(payment.performed_at.timestamp() * 1000) if payment.performed_at else 0,
+            "cancel_time": int(payment.cancelled_at.timestamp() * 1000) if payment.cancelled_at else 0,
+            "transaction": payment.payme_transaction_id,
             "state": payment.state,
             "reason": payment.reason
         }
-
-    except Exception as e:
-        return {
-            "error": {
-                "code": -31008,
-                "message": str(e)[:100]
-            }
-        }
+    except Payment.DoesNotExist:
+        return {"error": {"code": -31003, "message": "Transaction not found"}}
 
 
 def get_statement(params):
