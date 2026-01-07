@@ -56,26 +56,22 @@ def create_payme_link(order_id, amount):
 def check_payme_auth(request) -> bool:
     """
     Payme Authorization tekshiruvi
-    Payme talabi: Authorization = Basic base64("Paycom:SECRET_KEY")
+    TO‘G‘RI FORMAT:
+    Authorization: Basic base64("Paycom:SECRET_KEY")
     """
     try:
         auth_header = request.META.get("HTTP_AUTHORIZATION", "")
 
-        if not auth_header:
-            logger.error("❌ PAYME AUTH: Authorization header yo‘q")
+        if not auth_header or not auth_header.startswith("Basic "):
+            logger.error("❌ PAYME AUTH: Authorization header yo‘q yoki noto‘g‘ri")
             return False
 
-        if not auth_header.startswith("Basic "):
-            logger.error("❌ PAYME AUTH: Basic prefix noto‘g‘ri")
-            return False
-
-        # Basic <base64>
         encoded = auth_header.split(" ", 1)[1].strip()
 
         try:
             decoded = base64.b64decode(encoded).decode("utf-8")
         except Exception:
-            logger.error("❌ PAYME AUTH: Base64 decode xatosi")
+            logger.error("❌ PAYME AUTH: Base64 decode xato")
             return False
 
         secret_key = settings.PAYME_SETTINGS.get("SECRET_KEY")
@@ -92,8 +88,9 @@ def check_payme_auth(request) -> bool:
         return decoded == expected
 
     except Exception:
-        logger.exception("❌ PAYME AUTH CHECK FATAL ERROR")
+        logger.exception("❌ PAYME AUTH FATAL ERROR")
         return False
+
 
 
 
