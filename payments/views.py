@@ -150,10 +150,10 @@ def create_payment(request):
         logger.info(
             f"✅ Payment created: #{payment.id} (order_id: {payment.order_id}), user: {telegram_id}, tariff: {tariff.name}")
 
+        # ✅ FAQAT order_id va amount yuboriladi
         payme_url = create_payme_link(
-            telegram_id=telegram_id,
-            amount=float(tariff.price),
-            order_id=str(payment.order_id)
+            order_id=str(payment.order_id),
+            amount=float(tariff.price)
         )
 
         if not payme_url:
