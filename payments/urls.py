@@ -19,7 +19,8 @@ urlpatterns = [
 
     # To'lov yaratish va tekshirish
     path('payment/create/', views.create_payment, name='create_payment'),
-    path('payment/status/<int:telegram_id>/', views.check_payment_status, name='check_payment_status'),
+    # payments/urls.py
+    path('payment/status/<str:order_id>/', views.check_payment_status, name='check_payment_status'),
 
     # ============= PAYME MERCHANT API =============
     path('payme/callback/', views.payme_callback, name='payme_callback'),

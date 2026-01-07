@@ -532,21 +532,16 @@ def check_last_payment_status(request, telegram_id):
 
 
 @api_view(['GET'])
-def check_payment_status(request, telegram_id):
-    """To'lov holatini tekshirish (30 daqiqa)"""
+def check_payment_status(request, order_id):
+    """To'lov holatini tekshirish ORDER_ID orqali"""
     try:
-        try:
-            user = BotUser.objects.get(telegram_id=telegram_id)
-        except BotUser.DoesNotExist:
-            return Response({'success': False, 'error': 'Foydalanuvchi topilmadi', 'has_payment': False},
-                            status=status.HTTP_404_NOT_FOUND)
-
-        time_threshold = timezone.now() - timezone.timedelta(minutes=30)
-        payment = Payment.objects.filter(user=user, created_at__gte=time_threshold).order_by('-created_at').first()
+        payment = Payment.objects.filter(order_id=order_id).first()
 
         if not payment:
-            return Response({'success': True, 'has_payment': False, 'message': '30 daqiqa ichida to\'lov topilmadi',
-                             'balance': user.balance})
+            return Response({'success': False, 'error': 'Payment not found', 'has_payment': False},
+                            status=status.HTTP_404_NOT_FOUND)
+
+        user = payment.user
 
         return Response({
             'success': True,
@@ -569,3 +564,4 @@ def check_payment_status(request, telegram_id):
         logger.error(f"Check payment status error: {e}", exc_info=True)
         return Response({'success': False, 'error': str(e), 'has_payment': False},
                         status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
