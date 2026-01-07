@@ -1,4 +1,5 @@
 # payments/views.py - TO'LIQ TUZATILGAN (Payme response format fixed)
+import base64
 import json
 import logging
 from decimal import Decimal
@@ -183,6 +184,9 @@ def create_payment(request):
 
 # ============= PAYME CALLBACK =============
 
+logger = logging.getLogger("payme")
+
+
 @csrf_exempt
 @require_http_methods(["POST"])
 def payme_callback(request):
@@ -190,76 +194,130 @@ def payme_callback(request):
     Payme Merchant API callback handler
     ⚠️ Payme talabiga ko'ra HAR DOIM HTTP 200
     """
+    request_id = None
+
     try:
-        # 1. JSON parse
+        # ==============================
+        # 0. RAW DEBUG (ENG MUHIM QISM)
+        # ==============================
+        raw_auth = request.META.get("HTTP_AUTHORIZATION", "")
+        raw_body = request.body.decode("utf-8", errors="ignore")
+
+        logger.warning("===== PAYME RAW REQUEST =====")
+        logger.warning(f"AUTH HEADER: {raw_auth}")
+        logger.warning(f"RAW BODY: {raw_body}")
+        logger.warning("=============================")
+
+        # ==============================
+        # 1. JSON PARSE
+        # ==============================
         try:
-            body = json.loads(request.body.decode('utf-8'))
+            body = json.loads(raw_body)
         except json.JSONDecodeError:
+            logger.error("❌ JSON parse error")
             return JsonResponse({
-                'jsonrpc': '2.0',
-                'error': {'code': -32700, 'message': 'Parse error'},
-                'id': None
+                "jsonrpc": "2.0",
+                "error": {"code": -32700, "message": "Parse error"},
+                "id": None
             }, status=200)
 
-        method = body.get('method')
-        params = body.get('params') or {}
-        request_id = body.get('id')
+        method = body.get("method")
+        params = body.get("params") or {}
+        request_id = body.get("id")
 
-        logger.info(f"📥 Payme callback: {method} | {params}")
+        logger.info(f"📥 Payme METHOD: {method}")
+        logger.info(f"📥 Payme PARAMS: {params}")
 
-        # 2. Auth
-        if not check_payme_auth(request):
-            return JsonResponse({
-                'jsonrpc': '2.0',
-                'error': {
-                    'code': -32504,
-                    'message': 'Insufficient privileges'
-                },
-                'id': request_id
-            }, status=200)
-
-        # 3. Routing
-        if method == 'CheckPerformTransaction':
-            response = check_perform_transaction(params)
-        elif method == 'CreateTransaction':
-            response = create_transaction(params)
-        elif method == 'PerformTransaction':
-            response = perform_transaction(params)
-        elif method == 'CancelTransaction':
-            response = cancel_transaction(params)
-        elif method == 'CheckTransaction':
-            response = check_transaction(params)
-        elif method == 'GetStatement':
-            response = get_statement(params)
-        elif method == 'ChangePassword':
-            response = change_password(params)
+        # ==============================
+        # 2. AUTH CHECK (KUCHAYTIRILGAN)
+        # ==============================
+        if not raw_auth.startswith("Basic "):
+            logger.error("❌ AUTH ERROR: Basic header yo‘q")
+            auth_ok = False
         else:
+            try:
+                encoded = raw_auth.split(" ")[1]
+                decoded = base64.b64decode(encoded).decode("utf-8")
+
+                merchant_id = settings.PAYME_SETTINGS.get("MERCHANT_ID")
+                secret_key = settings.PAYME_SETTINGS.get("SECRET_KEY")
+
+                logger.warning(f"🔐 DECODED AUTH: {decoded}")
+                logger.warning(f"🔐 EXPECTED AUTH: {merchant_id}:{secret_key}")
+                logger.warning(f"🔐 SECRET LEN: {len(secret_key) if secret_key else 0}")
+
+                auth_ok = decoded == f"{merchant_id}:{secret_key}"
+
+            except Exception as e:
+                logger.exception("❌ AUTH decode error")
+                auth_ok = False
+
+        if not auth_ok:
             return JsonResponse({
-                'jsonrpc': '2.0',
-                'error': {'code': -32601, 'message': 'Method not found'},
-                'id': request_id
+                "jsonrpc": "2.0",
+                "error": {
+                    "code": -32504,
+                    "message": "Insufficient privileges"
+                },
+                "id": request_id
             }, status=200)
 
-        # 4. FINAL JSON-RPC RESPONSE
-        if 'error' in response:
+        # ==============================
+        # 3. METHOD ROUTING
+        # ==============================
+        if method == "CheckPerformTransaction":
+            result = check_perform_transaction(params)
+
+        elif method == "CreateTransaction":
+            result = create_transaction(params)
+
+        elif method == "PerformTransaction":
+            result = perform_transaction(params)
+
+        elif method == "CancelTransaction":
+            result = cancel_transaction(params)
+
+        elif method == "CheckTransaction":
+            result = check_transaction(params)
+
+        elif method == "GetStatement":
+            result = get_statement(params)
+
+        elif method == "ChangePassword":
+            result = change_password(params)
+
+        else:
+            logger.error(f"❌ UNKNOWN METHOD: {method}")
             return JsonResponse({
-                'jsonrpc': '2.0',
-                'error': response['error'],
-                'id': request_id
+                "jsonrpc": "2.0",
+                "error": {"code": -32601, "message": "Method not found"},
+                "id": request_id
             }, status=200)
 
+        # ==============================
+        # 4. FINAL RESPONSE
+        # ==============================
+        if "error" in result:
+            logger.error(f"❌ METHOD ERROR: {result}")
+            return JsonResponse({
+                "jsonrpc": "2.0",
+                "error": result["error"],
+                "id": request_id
+            }, status=200)
+
+        logger.info(f"✅ METHOD OK: {result}")
         return JsonResponse({
-            'jsonrpc': '2.0',
-            'result': response,
-            'id': request_id
+            "jsonrpc": "2.0",
+            "result": result,
+            "id": request_id
         }, status=200)
 
-    except Exception as e:
-        logger.error("❌ Payme callback fatal error", exc_info=True)
+    except Exception:
+        logger.exception("❌ PAYME CALLBACK FATAL ERROR")
         return JsonResponse({
-            'jsonrpc': '2.0',
-            'error': {'code': -32400, 'message': 'Internal error'},
-            'id': None
+            "jsonrpc": "2.0",
+            "error": {"code": -32400, "message": "Internal error"},
+            "id": request_id
         }, status=200)
 
 

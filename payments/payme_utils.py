@@ -49,10 +49,9 @@ def create_payme_link(order_id, amount):
 
 
 def check_payme_auth(request):
-    global PAYME_RUNTIME_SECRET
-
     try:
         auth_header = request.META.get("HTTP_AUTHORIZATION", "")
+
         if not auth_header.startswith("Basic "):
             return False
 
@@ -60,20 +59,19 @@ def check_payme_auth(request):
         decoded = base64.b64decode(encoded).decode("utf-8")
 
         payme_settings = getattr(settings, 'PAYME_SETTINGS', {})
-        merchant_id = payme_settings.get('MERCHANT_ID')
-        base_secret = payme_settings.get('SECRET_KEY')
+        merchant_id = payme_settings.get('MERCHANT_ID', '')
+        secret_key = payme_settings.get('SECRET_KEY', '')
 
-        valid_secrets = [base_secret]
-        if PAYME_RUNTIME_SECRET:
-            valid_secrets.append(PAYME_RUNTIME_SECRET)
+        if not merchant_id or not secret_key:
+            print("❌ PAYME credentials not configured")
+            return False
 
-        return decoded in [
-            f"{merchant_id}:{secret}" for secret in valid_secrets
-        ]
+        # ✅ TO‘G‘RI TEKSHIRUV
+        return decoded == f"{merchant_id}:{secret_key}"
 
-    except Exception:
+    except Exception as e:
+        print("❌ PAYME AUTH ERROR:", e)
         return False
-
 
 
 
