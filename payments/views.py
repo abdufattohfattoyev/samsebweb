@@ -192,13 +192,13 @@ logger = logging.getLogger("payme")
 def payme_callback(request):
     """
     Payme Merchant API callback handler
-    ⚠️ Payme talabiga ko'ra HAR DOIM HTTP 200
+    ⚠️ Payme talabiga ko‘ra HAR DOIM HTTP 200
     """
     request_id = None
 
     try:
         # ==============================
-        # 0. RAW DEBUG (ENG MUHIM QISM)
+        # 0. RAW DEBUG
         # ==============================
         raw_auth = request.META.get("HTTP_AUTHORIZATION", "")
         raw_body = request.body.decode("utf-8", errors="ignore")
@@ -214,7 +214,6 @@ def payme_callback(request):
         try:
             body = json.loads(raw_body)
         except json.JSONDecodeError:
-            logger.error("❌ JSON parse error")
             return JsonResponse({
                 "jsonrpc": "2.0",
                 "error": {"code": -32700, "message": "Parse error"},
@@ -229,30 +228,9 @@ def payme_callback(request):
         logger.info(f"📥 Payme PARAMS: {params}")
 
         # ==============================
-        # 2. AUTH CHECK (KUCHAYTIRILGAN)
+        # 2. AUTH CHECK (YAGONA MANBA)
         # ==============================
-        if not raw_auth.startswith("Basic "):
-            logger.error("❌ AUTH ERROR: Basic header yo‘q")
-            auth_ok = False
-        else:
-            try:
-                encoded = raw_auth.split(" ")[1]
-                decoded = base64.b64decode(encoded).decode("utf-8")
-
-                merchant_id = settings.PAYME_SETTINGS.get("MERCHANT_ID")
-                secret_key = settings.PAYME_SETTINGS.get("SECRET_KEY")
-
-                logger.warning(f"🔐 DECODED AUTH: {decoded}")
-                logger.warning(f"🔐 EXPECTED AUTH: {merchant_id}:{secret_key}")
-                logger.warning(f"🔐 SECRET LEN: {len(secret_key) if secret_key else 0}")
-
-                auth_ok = decoded == f"{merchant_id}:{secret_key}"
-
-            except Exception as e:
-                logger.exception("❌ AUTH decode error")
-                auth_ok = False
-
-        if not auth_ok:
+        if not check_payme_auth(request):
             return JsonResponse({
                 "jsonrpc": "2.0",
                 "error": {
@@ -287,7 +265,6 @@ def payme_callback(request):
             result = change_password(params)
 
         else:
-            logger.error(f"❌ UNKNOWN METHOD: {method}")
             return JsonResponse({
                 "jsonrpc": "2.0",
                 "error": {"code": -32601, "message": "Method not found"},
@@ -298,14 +275,12 @@ def payme_callback(request):
         # 4. FINAL RESPONSE
         # ==============================
         if "error" in result:
-            logger.error(f"❌ METHOD ERROR: {result}")
             return JsonResponse({
                 "jsonrpc": "2.0",
                 "error": result["error"],
                 "id": request_id
             }, status=200)
 
-        logger.info(f"✅ METHOD OK: {result}")
         return JsonResponse({
             "jsonrpc": "2.0",
             "result": result,
@@ -319,6 +294,7 @@ def payme_callback(request):
             "error": {"code": -32400, "message": "Internal error"},
             "id": request_id
         }, status=200)
+
 
 
 ## ============= PAYME METHODS (TO'LIQ VA TUZATILGAN) =============

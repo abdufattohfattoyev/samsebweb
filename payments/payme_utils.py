@@ -52,34 +52,20 @@ def create_payme_link(order_id, amount):
         return ""
 
 
-
 def check_payme_auth(request) -> bool:
     """
-    Payme Authorization tekshiruvi
-    TO‘G‘RI FORMAT:
     Authorization: Basic base64("Paycom:SECRET_KEY")
     """
     try:
         auth_header = request.META.get("HTTP_AUTHORIZATION", "")
 
-        if not auth_header or not auth_header.startswith("Basic "):
-            logger.error("❌ PAYME AUTH: Authorization header yo‘q yoki noto‘g‘ri")
+        if not auth_header.startswith("Basic "):
             return False
 
-        encoded = auth_header.split(" ", 1)[1].strip()
-
-        try:
-            decoded = base64.b64decode(encoded).decode("utf-8")
-        except Exception:
-            logger.error("❌ PAYME AUTH: Base64 decode xato")
-            return False
+        encoded = auth_header.split(" ", 1)[1]
+        decoded = base64.b64decode(encoded).decode("utf-8")
 
         secret_key = settings.PAYME_SETTINGS.get("SECRET_KEY")
-
-        if not secret_key:
-            logger.error("❌ PAYME AUTH: SECRET_KEY sozlanmagan")
-            return False
-
         expected = f"Paycom:{secret_key}"
 
         logger.warning(f"🔐 PAYME AUTH DECODED: {decoded}")
@@ -88,12 +74,8 @@ def check_payme_auth(request) -> bool:
         return decoded == expected
 
     except Exception:
-        logger.exception("❌ PAYME AUTH FATAL ERROR")
+        logger.exception("❌ PAYME AUTH ERROR")
         return False
-
-
-
-
 
 
 def tiyin_to_sum(amount_tiyin):
