@@ -49,9 +49,6 @@ def create_payme_link(order_id, amount):
 
 
 def check_payme_auth(request):
-    """
-    Payme callback autentifikatsiyasi
-    """
     try:
         auth_header = request.META.get("HTTP_AUTHORIZATION", "")
 
@@ -61,19 +58,21 @@ def check_payme_auth(request):
         encoded = auth_header.split(" ")[1]
         decoded = base64.b64decode(encoded).decode("utf-8")
 
-        # ✅ PAYME_SETTINGS dan o'qish
         payme_settings = getattr(settings, 'PAYME_SETTINGS', {})
+        merchant_id = payme_settings.get('MERCHANT_ID', '')
         secret_key = payme_settings.get('SECRET_KEY', '')
 
-        if not secret_key:
-            print("❌ ERROR: PAYME_SECRET_KEY not configured in settings.PAYME_SETTINGS")
+        if not merchant_id or not secret_key:
+            print("❌ PAYME credentials not configured")
             return False
 
-        return decoded == f"Paycom:{secret_key}"
+        # ✅ TO‘G‘RI TEKSHIRUV
+        return decoded == f"{merchant_id}:{secret_key}"
 
     except Exception as e:
         print("❌ PAYME AUTH ERROR:", e)
         return False
+
 
 
 def tiyin_to_sum(amount_tiyin):
