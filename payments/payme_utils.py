@@ -58,20 +58,16 @@ def check_payme_auth(request):
         encoded = auth_header.split(" ")[1]
         decoded = base64.b64decode(encoded).decode("utf-8")
 
-        payme_settings = getattr(settings, "PAYME_SETTINGS", {})
-        secret_key = payme_settings.get("SECRET_KEY")
+        secret_key = settings.PAYME_SETTINGS.get("SECRET_KEY")
 
         if not secret_key:
             return False
 
         # 🔥 PAYME REAL LOGIN
-        expected = f"Paycom:{secret_key}"
-
-        return decoded == expected
+        return decoded == f"Paycom:{secret_key}"
 
     except Exception:
         return False
-
 
 
 
