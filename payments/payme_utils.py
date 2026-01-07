@@ -2,6 +2,11 @@
 import base64
 import time
 from django.conf import settings
+import logging
+
+
+
+logger = logging.getLogger("payme")
 
 
 def create_payme_link(order_id, amount):
@@ -48,26 +53,34 @@ def create_payme_link(order_id, amount):
 
 
 
-def check_payme_auth(request):
+def check_payme_auth(request) -> bool:
+    """
+    Payme Authorization tekshiruvi
+    """
     try:
         auth_header = request.META.get("HTTP_AUTHORIZATION", "")
 
         if not auth_header.startswith("Basic "):
+            logger.error("❌ AUTH header yo‘q yoki noto‘g‘ri")
             return False
 
-        encoded = auth_header.split(" ")[1]
+        encoded = auth_header.split(" ", 1)[1]
         decoded = base64.b64decode(encoded).decode("utf-8")
 
         secret_key = settings.PAYME_SETTINGS.get("SECRET_KEY")
 
         if not secret_key:
+            logger.error("❌ PAYME_SECRET_KEY sozlanmagan")
             return False
 
-        # 🔥 PAYME REAL LOGIN
+        logger.warning(f"🔐 PAYME AUTH DECODED: {decoded}")
+
         return decoded == f"Paycom:{secret_key}"
 
     except Exception:
+        logger.exception("❌ PAYME AUTH CHECK ERROR")
         return False
+
 
 
 
