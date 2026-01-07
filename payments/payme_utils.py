@@ -4,62 +4,48 @@ import time
 from django.conf import settings
 
 
-def create_payme_link(telegram_id, amount, order_id):
+def create_payme_link(order_id, amount):
     """
-    Payme to'lov havolasini yaratish (TO'G'RI FORMAT)
-
+    Payme to'lov havolasini yaratish (sandbox test uchun)
     Args:
-        telegram_id: Telegram user ID
+        order_id: UNIQUE chek ID
         amount: so'mda (float yoki int)
-        order_id: UNIQUE chek ID (MAJBURIY)
     """
 
     try:
-        # ✅ PAYME_SETTINGS dan o'qish
         payme_settings = getattr(settings, 'PAYME_SETTINGS', {})
         merchant_id = payme_settings.get('MERCHANT_ID', '')
 
         if not merchant_id:
-            print("❌ ERROR: PAYME_MERCHANT_ID not configured in settings.PAYME_SETTINGS")
+            print("❌ ERROR: PAYME_MERCHANT_ID not configured")
             return ""
 
-        # 🔴 order_id MAJBURIY
         if not order_id:
             print("❌ ERROR: order_id is required")
             return ""
 
-        # 💰 so'm → tiyin
         amount_tiyin = int(float(amount) * 100)
 
-        # 📌 PARAMETRLAR (PAYME TALABI)
+        # Sandbox test uchun faqat order_id va summa yuboriladi
         params_list = [
             f"m={merchant_id}",
-            f"ac.order_id={order_id}",  # 🔴 MAJBURIY
-            f"ac.telegram_id={telegram_id}",  # ✅ ruxsat etilgan
+            f"ac.order_id={order_id}",
             f"a={amount_tiyin}",
         ]
 
         params_str = ";".join(params_list)
-
-        # 🔐 Base64 encode
-        encoded = base64.b64encode(
-            params_str.encode("utf-8")
-        ).decode("utf-8")
-
-        # Payme URL (settings dan)
+        encoded = base64.b64encode(params_str.encode("utf-8")).decode("utf-8")
         payme_url = payme_settings.get('PAYME_URL', 'https://checkout.paycom.uz')
         url = f"{payme_url}/{encoded}"
 
         print("✅ PAYME URL:", url)
         print("📋 PAYME PARAMS:", params_str)
-
         return url
 
     except Exception as e:
         print("❌ PAYME LINK ERROR:", e)
-        import traceback
-        traceback.print_exc()
         return ""
+
 
 
 def check_payme_auth(request):
