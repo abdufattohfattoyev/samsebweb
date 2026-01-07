@@ -56,30 +56,45 @@ def create_payme_link(order_id, amount):
 def check_payme_auth(request) -> bool:
     """
     Payme Authorization tekshiruvi
+    Payme talabi: Authorization = Basic base64("Paycom:SECRET_KEY")
     """
     try:
         auth_header = request.META.get("HTTP_AUTHORIZATION", "")
 
-        if not auth_header.startswith("Basic "):
-            logger.error("❌ AUTH header yo‘q yoki noto‘g‘ri")
+        if not auth_header:
+            logger.error("❌ PAYME AUTH: Authorization header yo‘q")
             return False
 
-        encoded = auth_header.split(" ", 1)[1]
-        decoded = base64.b64decode(encoded).decode("utf-8")
+        if not auth_header.startswith("Basic "):
+            logger.error("❌ PAYME AUTH: Basic prefix noto‘g‘ri")
+            return False
+
+        # Basic <base64>
+        encoded = auth_header.split(" ", 1)[1].strip()
+
+        try:
+            decoded = base64.b64decode(encoded).decode("utf-8")
+        except Exception:
+            logger.error("❌ PAYME AUTH: Base64 decode xatosi")
+            return False
 
         secret_key = settings.PAYME_SETTINGS.get("SECRET_KEY")
 
         if not secret_key:
-            logger.error("❌ PAYME_SECRET_KEY sozlanmagan")
+            logger.error("❌ PAYME AUTH: SECRET_KEY sozlanmagan")
             return False
 
-        logger.warning(f"🔐 PAYME AUTH DECODED: {decoded}")
+        expected = f"Paycom:{secret_key}"
 
-        return decoded == f"Paycom:{secret_key}"
+        logger.warning(f"🔐 PAYME AUTH DECODED: {decoded}")
+        logger.warning(f"🔐 PAYME AUTH EXPECTED: {expected}")
+
+        return decoded == expected
 
     except Exception:
-        logger.exception("❌ PAYME AUTH CHECK ERROR")
+        logger.exception("❌ PAYME AUTH CHECK FATAL ERROR")
         return False
+
 
 
 
