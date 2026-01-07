@@ -118,10 +118,10 @@ REST_FRAMEWORK = {
 PAYME_SETTINGS = {
     'MERCHANT_ID': config('PAYME_MERCHANT_ID', default=''),
     'SECRET_KEY': config('PAYME_SECRET_KEY', default=''),
-    'ACCOUNT_FIELD': config('PAYME_ACCOUNT_FIELD', default='telegram_id'),
+    'ACCOUNT_FIELD': 'order_id',  # ✅ MAJBURIY order_id (telegram_id emas!)
     'CALLBACK_URL': config('PAYME_CALLBACK_URL', default=''),
     'PAYME_URL': 'https://checkout.paycom.uz',
-    'MIN_AMOUNT': 5000,  # Minimal summa so'mda
+    'MIN_AMOUNT': 5000,
 }
 
 # Logging
