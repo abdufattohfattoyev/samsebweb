@@ -58,20 +58,20 @@ def check_payme_auth(request):
         encoded = auth_header.split(" ")[1]
         decoded = base64.b64decode(encoded).decode("utf-8")
 
-        payme_settings = getattr(settings, 'PAYME_SETTINGS', {})
-        merchant_id = payme_settings.get('MERCHANT_ID', '')
-        secret_key = payme_settings.get('SECRET_KEY', '')
+        payme_settings = getattr(settings, "PAYME_SETTINGS", {})
+        secret_key = payme_settings.get("SECRET_KEY")
 
-        if not merchant_id or not secret_key:
-            print("❌ PAYME credentials not configured")
+        if not secret_key:
             return False
 
-        # ✅ TO‘G‘RI TEKSHIRUV
-        return decoded == f"{merchant_id}:{secret_key}"
+        # 🔥 PAYME REAL LOGIN
+        expected = f"Paycom:{secret_key}"
 
-    except Exception as e:
-        print("❌ PAYME AUTH ERROR:", e)
+        return decoded == expected
+
+    except Exception:
         return False
+
 
 
 
