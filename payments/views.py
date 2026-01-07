@@ -492,13 +492,32 @@ def get_statement(params):
 
 
 def change_password(params):
-    """ChangePassword - Parolni o'zgartirish"""
+    global PAYME_RUNTIME_SECRET
+
     try:
-        logger.info("🔐 ChangePassword requested")
-        return {'success': True}
+        new_password = params.get("password")
+        if not new_password:
+            return {
+                "error": {
+                    "code": -32602,
+                    "message": "Invalid params"
+                }
+            }
+
+        # 🔐 yangi parolni eslab qolamiz (sandbox)
+        PAYME_RUNTIME_SECRET = new_password
+
+        logger.info("🔐 Payme password changed successfully (sandbox)")
+        return True   # MUHIM!
+
     except Exception as e:
-        logger.error(f"❌ ChangePassword error: {e}", exc_info=True)
-        return {'error': {'code': -32400, 'message': str(e)[:100]}}
+        return {
+            "error": {
+                "code": -32400,
+                "message": str(e)[:100]
+            }
+        }
+
 
 
 # ============= STATUS ENDPOINTS =============
