@@ -1,4 +1,4 @@
-# payments/admin.py - TO'LIQ TUZATILGAN
+# payments/admin.py - USER NONE MUAMMOSI YECHILDI
 
 from django.contrib import admin
 from django.utils.html import format_html
@@ -14,10 +14,12 @@ class PricingTariffAdmin(admin.ModelAdmin):
 
     def formatted_price(self, obj):
         return f"{obj.price:,.0f} so'm"
+
     formatted_price.short_description = 'Narxi'
 
     def formatted_price_per_one(self, obj):
         return f"{obj.price_per_one:,.2f} so'm"
+
     formatted_price_per_one.short_description = 'Bitta narxlash narxi'
 
 
@@ -49,22 +51,21 @@ class BotUserAdmin(admin.ModelAdmin):
 @admin.register(Payment)
 class PaymentAdmin(admin.ModelAdmin):
     """
-    ✅ ORDER_ID muammosi yechildi:
-    - list_display ga qo'shildi
-    - search_fields ga qo'shildi
-    - readonly_fields ga qo'shildi
-    - fieldsets ga qo'shildi
+    ✅ BARCHA MUAMMOLAR YECHILDI:
+    - order_id qo'shildi
+    - user None bo'lishi mumkinligi tekshiriladi
+    - Barcha fieldlar to'g'ri ishlaydi
     """
-    
+
     list_display = [
         'id',
-        'order_id_display',  # ✅ Maxsus formatda ko'rsatish
-        'user_link',
+        'order_id_display',
+        'user_link',  # ✅ To'g'irlandi
         'tariff',
         'formatted_amount',
         'pricing_count',
         'state_badge',
-        'payme_transaction_short',  # ✅ Qisqartirilgan transaction ID
+        'payme_transaction_short',
         'created_at'
     ]
 
@@ -72,22 +73,21 @@ class PaymentAdmin(admin.ModelAdmin):
 
     search_fields = [
         'id',
-        'order_id',  # ✅ QO'SHILDI! - order_id bo'yicha qidirish
+        'order_id',
         'payme_transaction_id',
         'user__telegram_id',
         'user__full_name',
         'user__username'
     ]
 
-    # ✅ MUHIM: order_id readonly qilish (avtomatik generate qiladi)
     readonly_fields = [
         'id',
-        'order_id',  # ✅ QO'SHILDI!
+        'order_id',
         'payme_transaction_id',
         'created_at',
         'performed_at',
         'cancelled_at',
-        'order_id_copy_button'  # ✅ Nusxalash tugmasi
+        'order_id_copy_button'
     ]
 
     ordering = ['-created_at']
@@ -96,8 +96,8 @@ class PaymentAdmin(admin.ModelAdmin):
         ('📋 Buyurtma ma\'lumotlari', {
             'fields': (
                 'id',
-                'order_id',  # ✅ QO'SHILDI!
-                'order_id_copy_button',  # ✅ Nusxalash uchun
+                'order_id',
+                'order_id_copy_button',
                 'user',
                 'tariff'
             )
@@ -124,6 +124,7 @@ class PaymentAdmin(admin.ModelAdmin):
                 short_id
             )
         return '-'
+
     order_id_display.short_description = 'Order ID'
 
     def order_id_copy_button(self, obj):
@@ -154,20 +155,40 @@ class PaymentAdmin(admin.ModelAdmin):
                 obj.order_id
             )
         return '-'
+
     order_id_copy_button.short_description = 'Order ID (test uchun)'
 
     def user_link(self, obj):
-        """Foydalanuvchi linkini ko'rsatish"""
+        """
+        ✅ TO'G'IRLANDI: Foydalanuvchi linkini ko'rsatish
+
+        MUHIM: obj.user None bo'lishi mumkin!
+        Sabablari:
+        1. To'lov yaratildi, lekin user hali bog'lanmagan
+        2. User o'chirilgan (cascade delete bo'lmasa)
+        3. Ma'lumotlar bazasida muammo
+        """
+        # ✅ USER TEKSHIRUVI
+        if not obj.user:
+            return format_html(
+                '<span style="color: #f44336; font-weight: bold;">❌ User yo\'q</span>'
+            )
+
+        # ✅ USER BOR BO'LSA, LINK KO'RSATISH
         return format_html(
-            '<a href="/admin/payments/botuser/{}/change/">{}</a>',
+            '<a href="/admin/payments/botuser/{}/change/" '
+            'style="text-decoration: none; color: #417690; font-weight: 500;">'
+            '👤 {}</a>',
             obj.user.id,
             obj.user.full_name
         )
+
     user_link.short_description = 'Foydalanuvchi'
 
     def formatted_amount(self, obj):
         """Summani formatlash"""
         return f"{obj.amount:,.0f} so'm"
+
     formatted_amount.short_description = 'Summa'
 
     def payme_transaction_short(self, obj):
@@ -181,6 +202,7 @@ class PaymentAdmin(admin.ModelAdmin):
                 short
             )
         return '-'
+
     payme_transaction_short.short_description = 'Payme TX'
 
     def state_badge(self, obj):
@@ -199,6 +221,7 @@ class PaymentAdmin(admin.ModelAdmin):
             color,
             obj.get_state_display()
         )
+
     state_badge.short_description = 'Holati'
 
 
@@ -211,15 +234,30 @@ class PricingHistoryAdmin(admin.ModelAdmin):
     ordering = ['-created_at']
 
     def user_link(self, obj):
+        """
+        ✅ TO'G'IRLANDI: Foydalanuvchi linkini ko'rsatish
+        Bu yerda ham user None bo'lishi mumkin
+        """
+        # ✅ USER TEKSHIRUVI
+        if not obj.user:
+            return format_html(
+                '<span style="color: #f44336; font-weight: bold;">❌ User yo\'q</span>'
+            )
+
+        # ✅ USER BOR BO'LSA, LINK KO'RSATISH
         return format_html(
-            '<a href="/admin/payments/botuser/{}/change/">{}</a>',
+            '<a href="/admin/payments/botuser/{}/change/" '
+            'style="text-decoration: none; color: #417690; font-weight: 500;">'
+            '👤 {}</a>',
             obj.user.id,
             obj.user.full_name
         )
+
     user_link.short_description = 'Foydalanuvchi'
 
     def formatted_price(self, obj):
         return f"{obj.price:,.2f} so'm"
+
     formatted_price.short_description = 'Narxi'
 
     def has_add_permission(self, request):
