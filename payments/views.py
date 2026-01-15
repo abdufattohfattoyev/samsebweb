@@ -385,39 +385,34 @@ def perform_transaction(params):
     payme_id = params.get('id')
 
     try:
-        payment = Payment.objects.get(payme_transaction_id=payme_id)
+        # select_for_update() - bir vaqtning o'zida ikkita so'rov kelsa balansni buzmaslik uchun
+        with db_transaction.atomic():
+            payment = Payment.objects.select_for_update().get(payme_transaction_id=payme_id)
 
-        # Tranzaksiya holati 'Yaratildi' bo'lsa, uni 'To'landi' holatiga o'tkazamiz
-        if payment.state == Payment.STATE_CREATED:
-            with db_transaction.atomic():
-                payment.state = Payment.STATE_COMPLETED
-                payment.performed_at = timezone.now()
-                payment.save()
+            # 1. Agar to'lov hali bajarilmagan bo'lsa
+            if payment.state == Payment.STATE_CREATED:
+                # Modeldagi tayyor perform() metodini chaqiramiz
+                # Bu metod ham holatni o'zgartiradi, ham balansni oshiradi
+                success = payment.perform()
 
-                # Foydalanuvchi balansini oshirish
-                user = payment.user
-                user.balance += payment.pricing_count
-                user.save()
+                if not success:
+                    return {"error": {"code": -31008, "message": "Cannot perform transaction"}}
 
-            return {
-                "transaction": payment.payme_transaction_id,
-                "perform_time": int(payment.performed_at.timestamp() * 1000),
-                "state": payment.state
-            }
-
-        # Agar allaqachon to'langan bo'lsa (Idempotent response)
-        elif payment.state == Payment.STATE_COMPLETED:
-            return {
-                "transaction": payment.payme_transaction_id,
-                "perform_time": int(payment.performed_at.timestamp() * 1000),
-                "state": payment.state
-            }
-
-        else:
-            return {"error": {"code": -31008, "message": "Cannot perform transaction"}}
+            # 2. Agar allaqachon bajarilgan bo'lsa yoki hozir bajarilgan bo'lsa
+            if payment.state == Payment.STATE_COMPLETED:
+                return {
+                    "transaction": payment.payme_transaction_id,
+                    "perform_time": int(payment.performed_at.timestamp() * 1000),
+                    "state": payment.state
+                }
+            else:
+                return {"error": {"code": -31008, "message": "Transaction state is invalid"}}
 
     except Payment.DoesNotExist:
         return {"error": {"code": -31003, "message": "Transaction not found"}}
+    except Exception as e:
+        logger.error(f"PerformTransaction Error: {e}")
+        return {"error": {"code": -32400, "message": "Internal error during perform"}}
 
 
 def cancel_transaction(params):
