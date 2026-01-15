@@ -379,39 +379,40 @@ def create_transaction(params):
 
 
 def perform_transaction(params):
-    """
-    PerformTransaction - To'lovni tasdiqlash va foydalanuvchi balansiga qo'shish.
-    """
     payme_id = params.get('id')
+    print(f"--- PAYME_CALLBACK: PerformTransaction chaqirildi. ID: {payme_id} ---")
 
     try:
-        # select_for_update() - bir vaqtning o'zida ikkita so'rov kelsa balansni buzmaslik uchun
         with db_transaction.atomic():
+            # select_for_update orqali qulflash
             payment = Payment.objects.select_for_update().get(payme_transaction_id=payme_id)
+            print(f"--- DEBUG: To'lov topildi. OrderID: {payment.order_id}, Hozirgi holati: {payment.state} ---")
 
-            # 1. Agar to'lov hali bajarilmagan bo'lsa
             if payment.state == Payment.STATE_CREATED:
-                # Modeldagi tayyor perform() metodini chaqiramiz
-                # Bu metod ham holatni o'zgartiradi, ham balansni oshiradi
+                print(f"--- DEBUG: perform() metodi chaqirilmoqda... ---")
                 success = payment.perform()
+                print(f"--- DEBUG: perform() yakunlandi. Natija: {success} ---")
 
                 if not success:
                     return {"error": {"code": -31008, "message": "Cannot perform transaction"}}
 
-            # 2. Agar allaqachon bajarilgan bo'lsa yoki hozir bajarilgan bo'lsa
             if payment.state == Payment.STATE_COMPLETED:
+                print(f"--- DEBUG: To'lov muvaffaqiyatli yakunlangan. Javob yuborilmoqda. ---")
                 return {
                     "transaction": payment.payme_transaction_id,
                     "perform_time": int(payment.performed_at.timestamp() * 1000),
                     "state": payment.state
                 }
             else:
+                print(f"--- DEBUG: To'lov holati COMPLETED emas: {payment.state} ---")
                 return {"error": {"code": -31008, "message": "Transaction state is invalid"}}
 
     except Payment.DoesNotExist:
+        print(f"--- DEBUG: XATO! Tranzaksiya ID topilmadi: {payme_id} ---")
         return {"error": {"code": -31003, "message": "Transaction not found"}}
     except Exception as e:
-        logger.error(f"PerformTransaction Error: {e}")
+        print(f"--- DEBUG: FATAL ERROR: {str(e)} ---")
+        logger.error(f"PerformTransaction Error: {e}", exc_info=True)
         return {"error": {"code": -32400, "message": "Internal error during perform"}}
 
 

@@ -58,6 +58,7 @@ def create_user(request):
         )
 
         if not created:
+            # Mavjud userni yangilash
             if full_name:
                 user.full_name = full_name
             if username is not None:
@@ -70,11 +71,51 @@ def create_user(request):
             'balance': user.balance,
             'full_name': user.full_name,
             'username': user.username,
+            'phone': user.phone,  # ✅ PHONE field
+            'is_active': user.is_active,
             'created': created
         })
     except Exception as e:
         logger.error(f"Create user error: {e}", exc_info=True)
         return Response({'success': False, 'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(['POST'])
+def update_phone(request):
+    """Telefon raqamini yangilash"""
+    telegram_id = request.data.get('telegram_id')
+    phone = request.data.get('phone')
+
+    if not telegram_id or not phone:
+        return Response({
+            'success': False,
+            'error': 'telegram_id va phone majburiy'
+        }, status=status.HTTP_400_BAD_REQUEST)
+
+    try:
+        user = BotUser.objects.get(telegram_id=telegram_id)
+        user.phone = phone
+        user.save(update_fields=['phone', 'updated_at'])
+
+        logger.info(f"✅ Phone updated: {telegram_id} -> {phone}")
+
+        return Response({
+            'success': True,
+            'telegram_id': user.telegram_id,
+            'phone': user.phone,
+            'message': 'Telefon raqami yangilandi'
+        })
+    except BotUser.DoesNotExist:
+        return Response({
+            'success': False,
+            'error': 'Foydalanuvchi topilmadi'
+        }, status=status.HTTP_404_NOT_FOUND)
+    except Exception as e:
+        logger.error(f"Update phone error: {e}", exc_info=True)
+        return Response({
+            'success': False,
+            'error': str(e)
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
 @api_view(['GET'])
