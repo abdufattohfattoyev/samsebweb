@@ -182,7 +182,9 @@ class Payment(models.Model):
 
     # ===== PERFORM =====
     def perform(self):
+        print(f"--- DEBUG: Perform boshlandi. State: {self.state}, Pricing count: {self.pricing_count} ---")
         if self.state != self.STATE_CREATED:
+            print(f"--- DEBUG: XATO! To'lov holati noto'g'ri: {self.state} ---")
             return False
 
         self.state = self.STATE_COMPLETED
@@ -194,9 +196,14 @@ class Payment(models.Model):
             "performed_at",
             "payme_perform_time"
         ])
+        print(f"--- DEBUG: Payment holati COMPLETED ga o'zgartirildi ---")
 
         if self.user and self.pricing_count:
-            self.user.add_balance(self.pricing_count)
+            print(f"--- DEBUG: Balans oshirilmoqda. User: {self.user.telegram_id}, Miqdor: {self.pricing_count} ---")
+            success = self.user.add_balance(self.pricing_count)
+            print(f"--- DEBUG: Balans oshirish natijasi: {success} ---")
+        else:
+            print(f"--- DEBUG: XATO! User yoki pricing_count topilmadi: User={self.user}, Count={self.pricing_count} ---")
 
         return True
 
