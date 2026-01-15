@@ -13,6 +13,7 @@ urlpatterns = [
     # Foydalanuvchi
     path('user/create/', views.create_user, name='create_user'),
     path('user/<int:telegram_id>/balance/', views.get_balance, name='get_balance'),
+    path('user/update-phone/', views.update_phone, name='update_phone'),
 
     # Narxlash
     path('pricing/use/', views.use_pricing, name='use_pricing'),
