@@ -58,6 +58,7 @@ def create_user(request):
         )
 
         if not created:
+            # Mavjud userni yangilash
             if full_name:
                 user.full_name = full_name
             if username is not None:
@@ -70,6 +71,8 @@ def create_user(request):
             'balance': user.balance,
             'full_name': user.full_name,
             'username': user.username,
+            'phone': user.phone,  # ✅ PHONE field
+            'is_active': user.is_active,
             'created': created
         })
     except Exception as e:
@@ -295,9 +298,6 @@ def payme_callback(request):
             "id": request_id
         }, status=200)
 
-
-
-## ============= PAYME METHODS (TO'LIQ VA TUZATILGAN) =============
 
 def check_perform_transaction(params):
     """
