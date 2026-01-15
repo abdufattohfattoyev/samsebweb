@@ -425,40 +425,67 @@ def perform_transaction(params):
     """
     payme_id = params.get('id')
 
+    logger.info(f"📥 PerformTransaction called with ID: {payme_id}")
+
     try:
         payment = Payment.objects.get(payme_transaction_id=payme_id)
+
+        logger.info(f"📊 Payment found: ID={payment.id}, State={payment.state}, "
+                    f"User={payment.user_id if payment.user else 'None'}, "
+                    f"Count={payment.pricing_count}")
 
         # Tranzaksiya holati 'Yaratildi' bo'lsa, uni 'To'landi' holatiga o'tkazamiz
         if payment.state == Payment.STATE_CREATED:
             with db_transaction.atomic():
+                # 1. To'lovni 'To'landi' holatiga o'tkazish
                 payment.state = Payment.STATE_COMPLETED
                 payment.performed_at = timezone.now()
-                payment.save()
+                payment.payme_perform_time = int(payment.performed_at.timestamp() * 1000)
 
-                # Foydalanuvchi balansini oshirish
-                user = payment.user
-                user.balance += payment.pricing_count
-                user.save()
+                # 2. Balansni faqat user va pricing_count mavjud bo'lsa oshirish
+                if payment.user and payment.pricing_count:
+                    payment.user.balance += payment.pricing_count
+                    payment.user.save(update_fields=['balance', 'updated_at'])
+                    logger.info(f"✅ Balance updated: user={payment.user_id}, "
+                                f"added={payment.pricing_count}, new_balance={payment.user.balance}")
+                else:
+                    logger.warning(f"⚠️ No user or pricing_count: user={payment.user_id}, "
+                                   f"count={payment.pricing_count}")
+
+                # 3. To'lovni saqlash
+                payment.save(update_fields=['state', 'performed_at', 'payme_perform_time'])
+
+                logger.info(f"✅ Transaction performed: payment_id={payment.id}, "
+                            f"state={payment.state}, time={payment.performed_at}")
 
             return {
                 "transaction": payment.payme_transaction_id,
-                "perform_time": int(payment.performed_at.timestamp() * 1000),
+                "perform_time": payment.payme_perform_time,
                 "state": payment.state
             }
 
         # Agar allaqachon to'langan bo'lsa (Idempotent response)
         elif payment.state == Payment.STATE_COMPLETED:
+            logger.info(f"📄 Transaction already completed: {payme_id}")
+
+            perform_time = int(payment.performed_at.timestamp() * 1000) if payment.performed_at else 0
+
             return {
                 "transaction": payment.payme_transaction_id,
-                "perform_time": int(payment.performed_at.timestamp() * 1000),
+                "perform_time": perform_time,
                 "state": payment.state
             }
 
         else:
+            logger.error(f"❌ Cannot perform transaction in state: {payment.state}")
             return {"error": {"code": -31008, "message": "Cannot perform transaction"}}
 
     except Payment.DoesNotExist:
+        logger.error(f"❌ Transaction not found: {payme_id}")
         return {"error": {"code": -31003, "message": "Transaction not found"}}
+    except Exception as e:
+        logger.error(f"❌ PerformTransaction error: {e}", exc_info=True)
+        return {"error": {"code": -32400, "message": "Internal server error"}}
 
 
 def cancel_transaction(params):
