@@ -1,8 +1,7 @@
-# payments/admin.py - FIXED: TypeError in format_html
+# payments/admin.py - USER NONE MUAMMOSI YECHILDI
 
 from django.contrib import admin
 from django.utils.html import format_html
-from django.utils.safestring import mark_safe  # ✅ ADDED
 from .models import PricingTariff, BotUser, Payment, PricingHistory
 
 
@@ -55,14 +54,13 @@ class PaymentAdmin(admin.ModelAdmin):
     ✅ BARCHA MUAMMOLAR YECHILDI:
     - order_id qo'shildi
     - user None bo'lishi mumkinligi tekshiriladi
-    - format_html TypeError fixed with mark_safe
     - Barcha fieldlar to'g'ri ishlaydi
     """
 
     list_display = [
         'id',
         'order_id_display',
-        'user_link',
+        'user_link',  # ✅ To'g'irlandi
         'tariff',
         'formatted_amount',
         'pricing_count',
@@ -162,18 +160,21 @@ class PaymentAdmin(admin.ModelAdmin):
 
     def user_link(self, obj):
         """
-        ✅ FIXED: Foydalanuvchi linkini ko'rsatish
+        ✅ TO'G'IRLANDI: Foydalanuvchi linkini ko'rsatish
 
         MUHIM: obj.user None bo'lishi mumkin!
-        FIX: mark_safe ishlatildi (format_html o'rniga) placeholder bo'lmaganda
+        Sabablari:
+        1. To'lov yaratildi, lekin user hali bog'lanmagan
+        2. User o'chirilgan (cascade delete bo'lmasa)
+        3. Ma'lumotlar bazasida muammo
         """
-        # ✅ USER TEKSHIRUVI - mark_safe ishlatiladi
+        # ✅ USER TEKSHIRUVI
         if not obj.user:
-            return mark_safe(
+            return format_html(
                 '<span style="color: #f44336; font-weight: bold;">❌ User yo\'q</span>'
             )
 
-        # ✅ USER BOR BO'LSA, LINK KO'RSATISH - format_html ishlatiladi
+        # ✅ USER BOR BO'LSA, LINK KO'RSATISH
         return format_html(
             '<a href="/admin/payments/botuser/{}/change/" '
             'style="text-decoration: none; color: #417690; font-weight: 500;">'
@@ -234,16 +235,16 @@ class PricingHistoryAdmin(admin.ModelAdmin):
 
     def user_link(self, obj):
         """
-        ✅ FIXED: Foydalanuvchi linkini ko'rsatish
-        FIX: mark_safe ishlatildi (format_html o'rniga) placeholder bo'lmaganda
+        ✅ TO'G'IRLANDI: Foydalanuvchi linkini ko'rsatish
+        Bu yerda ham user None bo'lishi mumkin
         """
-        # ✅ USER TEKSHIRUVI - mark_safe ishlatiladi
+        # ✅ USER TEKSHIRUVI
         if not obj.user:
-            return mark_safe(
+            return format_html(
                 '<span style="color: #f44336; font-weight: bold;">❌ User yo\'q</span>'
             )
 
-        # ✅ USER BOR BO'LSA, LINK KO'RSATISH - format_html ishlatiladi
+        # ✅ USER BOR BO'LSA, LINK KO'RSATISH
         return format_html(
             '<a href="/admin/payments/botuser/{}/change/" '
             'style="text-decoration: none; color: #417690; font-weight: 500;">'
