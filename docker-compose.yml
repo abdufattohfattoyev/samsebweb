@@ -16,10 +16,10 @@ services:
       - app-network
 
   androboss:
-    build: ../androboss
+    build: ../androboss_site
     command: gunicorn --bind 0.0.0.0:8000 config.wsgi:application
     volumes:
-      - ../androboss:/app
+      - ../androboss_site:/app
     networks:
       - app-network
 
