@@ -43,13 +43,23 @@ services:
 
   certbot:
     image: certbot/certbot
-    entrypoint: ["/bin/sh", "-c"]
-    command: >-
-      certbot certonly --webroot --webroot-path=/var/www/certbot
-      --email abdufattohfattoyev0@gmail.com --agree-tos --no-eff-email
-      --force-renewal
-      -d sebmarket.uz -d www.sebmarket.uz
-      -d andro-boss.uz -d www.andro-boss.uz
+    command:
+      - certonly
+      - --webroot
+      - --webroot-path=/var/www/certbot
+      - --email
+      - abdufattohfattoyev0@gmail.com
+      - --agree-tos
+      - --no-eff-email
+      - --force-renewal
+      - -d
+      - sebmarket.uz
+      - -d
+      - www.sebmarket.uz
+      - -d
+      - andro-boss.uz
+      - -d
+      - www.andro-boss.uz
     volumes:
       - /etc/letsencrypt:/etc/letsencrypt
       - certbot_www:/var/www/certbot
