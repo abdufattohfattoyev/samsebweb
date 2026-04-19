@@ -3,25 +3,16 @@ version: '3.8'
 services:
   web:
     build: .
-    command: gunicorn --bind 0.0.0.0:8000 config.wsgi:application
+    entrypoint: ["/app/entrypoint.sh"]
     volumes:
-      - .:/app
       - static_volume:/app/staticfiles
       - media_volume:/app/media
-    environment:
-      - SECRET_KEY=${SECRET_KEY}
-      - DEBUG=${DEBUG}
-      - SECURE_SSL_REDIRECT=${SECURE_SSL_REDIRECT}
+      - ./logs:/app/logs
+    env_file:
+      - .env
     networks:
       - app-network
-
-  androboss:
-    build: ../androboss_site
-    command: gunicorn --bind 0.0.0.0:8000 config.wsgi:application
-    volumes:
-      - ../androboss_site:/app
-    networks:
-      - app-network
+    restart: unless-stopped
 
   nginx:
     image: nginx:latest
@@ -32,11 +23,11 @@ services:
       - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
       - static_volume:/app/staticfiles
       - media_volume:/app/media
+      - androboss_media:/app/androboss_media
       - /etc/letsencrypt:/etc/letsencrypt:ro
       - certbot_www:/var/www/certbot
     depends_on:
       - web
-      - androboss
     networks:
       - app-network
     restart: unless-stopped
@@ -69,6 +60,7 @@ services:
 volumes:
   static_volume:
   media_volume:
+  androboss_media:
   certbot_www:
 
 networks:
